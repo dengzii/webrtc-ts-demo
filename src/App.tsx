@@ -79,6 +79,9 @@ function App() {
 						dialing.onFail = (msg) => {
 							alert(msg);
 						}
+						dialing.onReject = () => {
+							setRtcState("idle");
+						}
 						dialing.onAccept = (c: Call) => {
 							c.onHangup = () => {
 								setRtcState("idle");
@@ -125,6 +128,17 @@ function App() {
 		signaling.helloToFriend(to)
 	}
 
+	const onRejectClick = () => {
+		incomming?.reject().then(() => {
+			setIncomming(null);
+		}).catch(e => {
+			alert("error" + e);
+		}).finally(() => {
+			setRtcState("idle");
+		}
+		)
+	}
+
 	let btnText = "";
 	switch (rtcState) {
 		case "idle":
@@ -152,7 +166,10 @@ function App() {
 					<small>Signling Server: </small><input type="text" ref={signalingRef} value={signalingUrl} /><button onClick={onConnectClick}>connect</button><br />
 					<small>Your ID: </small> <input type="text" ref={yourIdRef} /><br />
 					<small>Friend ID: </small> <input type="text" ref={friendIdRef} /> {updateFriendId ? <small>Updated</small> : <></>} <br />
-					<button onClick={onBtnClick}>{btnText}</button><button onClick={onSayHelloClick}>Say Hello</button> {hello ? <small>Replyied</small> : <></>}<br />
+					<button onClick={onBtnClick}>{btnText}</button>
+					{rtcState === "incoming" ? <button onClick={onRejectClick}>Reject</button> : <></>}
+
+					<button onClick={onSayHelloClick}>Say Hello</button> {hello ? <small>Replyied</small> : <></>}<br />
 					<textarea style={{ width: "400px", height: "200px", wordBreak: "keep-all" }} defaultValue={log.join("\n")} />
 				</div>
 			</header >

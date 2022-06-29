@@ -9,13 +9,14 @@ export interface Dialing {
     cancel(): Promise<void>;
     onFail: (error: string) => void;
     onAccept: (accept: Call) => void;
+    onReject: () => void;
 }
 
 export interface Incomming {
     peer: PeerInfo;
 
     accept(): Promise<Call>;
-    reject(): void;
+    reject(): Promise<void>;
     onCancel: () => void;
 }
 
@@ -73,6 +74,7 @@ export class WsDialing implements Dialing {
     private failCallback: (error: string) => void = () => { }
 
     onAccept: ((accept: Call) => void) = () => { };
+    onReject: (() => void) = () => { };
     onFail: ((msg: string) => void) = () => { };
 
     peerId: string;
@@ -88,6 +90,7 @@ export class WsDialing implements Dialing {
     public cancel(): Promise<void> {
         this.callTimer && clearInterval(this.callTimer!!);
         this.removeMessageListener()
+        this.signaling.deleteIncomming(this.peerId)
 
         return this.signaling.sendSignaling(this.peerId, SignalingType.Cancel, this.myInfo)
     }
@@ -107,9 +110,18 @@ export class WsDialing implements Dialing {
                     const peerInfo = JSON.parse(m.content) as PeerInfo
                     if (peerInfo.Id == this.peerId) {
                         this.accepted = true;
+                        this.signaling.deleteIncomming(this.peerId)
                         this.callTimer && clearInterval(this.callTimer!!);
                         this.removeMessageListener()
                         this.onAccept(new WsCall(peerInfo, this.signaling))
+                    }
+                } else if (m.type === SignalingType.Reject) {
+                    const peerInfo = JSON.parse(m.content) as PeerInfo
+                    if (peerInfo.Id == this.peerId) {
+                        this.signaling.deleteIncomming(this.peerId)
+                        this.callTimer && clearInterval(this.callTimer!!);
+                        this.removeMessageListener()
+                        this.onReject()
                     }
                 }
             });
@@ -174,6 +186,7 @@ export class WsIncomming implements Incomming {
                     this.removeMessageListener()
                     this.timeout && clearInterval(this.timeout!!);
                     this.onCancel()
+                    this.signaling.deleteIncomming(this.peer.Id)
                 }
             }
         })
@@ -184,6 +197,7 @@ export class WsIncomming implements Incomming {
 
         this.timeout = setTimeout(() => {
             this.onCancel();
+            this.signaling.deleteIncomming(this.peer.Id)
             this.removeMessageListener()
         }, 2000);
     }
@@ -200,10 +214,12 @@ export class WsIncomming implements Incomming {
             });
     }
 
-    reject(): void {
+    reject(): Promise<void> {
         this.removeMessageListener()
         this.timeout && clearInterval(this.timeout!!);
 
-        this.signaling.sendSignaling(this.peer.Id, SignalingType.Reject, { Id: this.signaling.myId })
+        // this.signaling.deleteIncomming(this.peer.Id)
+
+        return this.signaling.sendSignaling(this.peer.Id, SignalingType.Reject, { Id: this.signaling.myId })
     }
 }

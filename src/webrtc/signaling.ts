@@ -171,6 +171,12 @@ export class WsSignaling implements Signaling {
         });
     }
 
+    deleteIncomming(peerId: string) {
+        if (this.incommings.has(peerId)) {
+            this.incommings.delete(peerId);
+        }
+    }
+
     public onMessageReceived(callback: (message: any) => void) {
         this.onMessageCallback = callback;
     }
