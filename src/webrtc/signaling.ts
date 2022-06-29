@@ -1,4 +1,21 @@
 import { json } from "stream/consumers";
+import { Call, Dialing, Incomming, WsDialing, WsIncomming } from "./dialing";
+
+export enum SignalingType {
+    Hi = 1,
+    Hello = 2,
+
+    Dialing = 10,
+    Accept = 20,
+    Reject = 30,
+    Hangup = 40,
+    Cancel = 50,
+
+    Offer = 100,
+    Answer = 200,
+    Ice = 300,
+    Close = 400,
+}
 
 interface Message {
     action: string;
@@ -8,7 +25,7 @@ interface Message {
     to: string | null;
 }
 
-interface SignalingMessage {
+export interface SignalingMessage {
     type: number;
     content: string;
 }
@@ -19,19 +36,35 @@ interface Hello {
     heartbeat_interval: number | null;
 }
 
-export class Signling {
+export interface Signaling {
+    avaliable(): boolean;
+    dialing(peerId: string): Promise<Dialing>;
+    sendOffer(peerId: string, offer: RTCSessionDescriptionInit): Promise<void>;
+    sendAnswer(peerId: string, answer: RTCSessionDescriptionInit): Promise<void>;
+    onIncomming: (peerId: string, incoming: Incomming) => void;
+    onOffer: (peerId: string, offer: RTCSessionDescriptionInit) => void;
+    onAnswer: (peerId: string, answer: RTCSessionDescriptionInit) => void;
+}
+
+export class WsSignaling implements Signaling {
 
     private ws: WebSocket;
     private url: string;
     private onMessageCallback: (message: any) => void = () => { };
     private heartbeatTimer: NodeJS.Timer | null = null;
-    private myId: string | null = null;
     private seq = 0;
     private idCallback: (id: string) => void = () => { }
 
-    onHelloCallback: (id: string, replay: boolean) => void = () => { }
+    private messageListeners: Array<(m: SignalingMessage) => void> = new Array();
+    private incommings = new Map<string, Incomming>();
 
-    logCallback: (message: string) => void = () => { }
+    myId: string | null = null;
+
+    onIncomming: (peerId: string, incoming: Incomming) => void = () => { }
+    onOffer: (peerId: string, offer: RTCSessionDescriptionInit) => void = () => { };
+    onAnswer: (peerId: string, answer: RTCSessionDescriptionInit) => void = () => { };
+    onHelloCallback: (id: string, replay: boolean) => void = () => { }
+    logCallback: (message: string) => void = () => { };
 
     constructor(url: string) {
         this.url = url;
@@ -41,6 +74,37 @@ export class Signling {
         this.ws.onclose = (e) => this.onClose(e)
         this.ws.onmessage = (e) => this.onMessage(e)
         this.startHeartbeat();
+    }
+
+    dialing(peerId: string): Promise<Dialing> {
+        const dialing = new WsDialing(peerId, this);
+        return dialing.dial().then(() => {
+            return dialing;
+        });
+    }
+
+    avaliable(): boolean {
+        return this.ws.readyState === WebSocket.OPEN && this.myId !== null;
+    }
+
+    sendOffer(peerId: string, offer: RTCSessionDescriptionInit): Promise<void> {
+        return this.sendMessage(peerId, {
+            type: SignalingType.Offer,
+            content: JSON.stringify(offer)
+        });
+    }
+    sendAnswer(peerId: string, answer: RTCSessionDescriptionInit): Promise<void> {
+        return this.sendMessage(peerId, {
+            type: SignalingType.Answer,
+            content: JSON.stringify(answer)
+        });
+    }
+
+    addMessageListener(l: (m: SignalingMessage) => void): () => void {
+        this.messageListeners.push(l);
+        return () => {
+            this.messageListeners = this.messageListeners.filter(x => x !== l);
+        }
     }
 
     private startHeartbeat() {
@@ -74,22 +138,37 @@ export class Signling {
         this.sendMessage(id, {
             type: replay ? 2 : 1,
             content: this.myId!!
+        }).then()
+    }
+
+    public sendSignaling(to: string, type: number, content: any): Promise<void> {
+        return this.sendMessage(to, {
+            type: type,
+            content: JSON.stringify(content)
         })
     }
 
-    public sendMessage(to: string, data: SignalingMessage) {
-        this.send({
+    public async sendMessage(to: string, data: SignalingMessage): Promise<void> {
+        await this.send({
             action: "message.cli",
             data: data,
             seq: this.seq++,
             from: this.myId,
             to: to,
         });
+        return await Promise.resolve();
     }
 
-    private send(message: Message) {
-        this.beautifulLog('send: ' + JSON.stringify(message));
-        this.ws.readyState === WebSocket.OPEN && this.ws.send(JSON.stringify(message));
+    private send(message: Message): Promise<Message> {
+        return new Promise((resolve, reject) => {
+            if (this.ws.readyState !== WebSocket.OPEN) {
+                reject(new Error("WebSocket is not open"))
+            } else {
+                this.beautifulLog('send: ' + JSON.stringify(message));
+                this.ws.send(JSON.stringify(message));
+                resolve(message);
+            }
+        });
     }
 
     public onMessageReceived(callback: (message: any) => void) {
@@ -102,7 +181,7 @@ export class Signling {
 
         switch (message.action) {
             case "message.cli":
-                this.handleMessage(message.data as SignalingMessage);
+                this.onSignalingMessage(message.data as SignalingMessage);
                 break;
             case "hello":
                 const h = message.data as Hello
@@ -113,32 +192,45 @@ export class Signling {
         }
     }
 
-    private handleMessage(m: SignalingMessage) {
+    private onSignalingMessage(m: SignalingMessage) {
+        this.beautifulLog('onSignalingMessage: ' + JSON.stringify(m));
+        this.messageListeners.forEach(l => l(m));
+
         switch (m.type) {
-            case 1:
+            case SignalingType.Hi:
                 this.helloToFriend(m.content, true);
                 this.onHelloCallback(m.content, false)
                 break;
-            case 2:
+            case SignalingType.Hello:
                 this.onHelloCallback(m.content, true)
                 break;
+            case SignalingType.Dialing:
+                const peer = JSON.parse(m.content);
+                if (!this.incommings.has(peer.Id)) {
+                    const incomming = new WsIncomming(peer, this);
+                    this.incommings.set(peer.Id, incomming);
+                    this.onIncomming(peer.Id, incomming);
+                }
         }
     }
 
     private onError(errorEvent: Event) {
+        this.myId = null;
         this.beautifulLog('error, ' + errorEvent);
     }
 
     private onClose(closeEvent: CloseEvent) {
+        this.myId = null;
         this.beautifulLog('disconnected, ' + closeEvent);
     }
 
     private onOpen() {
+        this.myId = null;
         this.beautifulLog('connected');
     }
 
     private beautifulLog(message: string) {
-        this.logCallback("WebSocket: " + message)
-        console.log('%s %c%s', 'WebSocket', 'color: #00a8ff; font-weight: bold;', message);
+        this.logCallback("Signaling: " + message)
+        console.log('%s %c%s', 'Signaling', 'color: #000000; font-weight: bold;', message);
     }
 }

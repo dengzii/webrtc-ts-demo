@@ -1,4 +1,31 @@
 import { off } from "process";
+import { Call, Dialing, WsDialing } from "./dialing";
+import { Signaling, WsSignaling } from "./signaling";
+
+let iceServer: RTCIceServer[] = [
+    {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+    },
+    {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+    },
+    {
+        urls: "turn:openrelay.metered.ca:443?transport=tcp",
+        username: "openrelayproject",
+        credential: "openrelayproject",
+    },
+    {
+        urls: 'stun:stun.l.google.com:19302',
+    },
+]
+
+export function setIceServer(iceServer: RTCIceServer[]) {
+    iceServer = iceServer;
+}
 
 export async function testWebRTC(s: (stream: MediaStream) => void): Promise<MediaStream> {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -8,12 +35,7 @@ export async function testWebRTC(s: (stream: MediaStream) => void): Promise<Medi
 
 function connectionPeer(stream: MediaStream, s: (stream: MediaStream) => void) {
     const rtcPeerConnectionConfig: RTCConfiguration = {
-        iceServers: [
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' },
-        ],
+        iceServers: iceServer,
         iceCandidatePoolSize: 10,
         bundlePolicy: 'max-bundle',
         rtcpMuxPolicy: 'require',
@@ -56,23 +78,23 @@ function connectionPeer(stream: MediaStream, s: (stream: MediaStream) => void) {
 export class WebRTC {
 
     private localStream: MediaStream | null = null;
-    private remoteStream: MediaStream | null = null;
+    private remoteStream: ReadonlyArray<MediaStream> | null = null;
     private peerConnection: RTCPeerConnection;
     private rtcPeerConnectionConfig: RTCConfiguration = {};
 
-    constructor() {
+    private signaling: Signaling
+
+    onOfferIncoming: (peerId: string, answer: () => Promise<void>) => void = () => { };
+    onAnswered: (peerId: string) => void = () => { };
+
+    constructor(signling: Signaling) {
         this.rtcPeerConnectionConfig = {
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' },
-                { urls: 'stun:stun2.l.google.com:19302' },
-                { urls: 'stun:stun3.l.google.com:19302' },
-                { urls: 'stun:stun4.l.google.com:19302' },
-            ],
+            iceServers: iceServer,
             iceCandidatePoolSize: 10,
             bundlePolicy: 'max-bundle',
             rtcpMuxPolicy: 'require',
         };
+        this.signaling = signling;
         this.peerConnection = new RTCPeerConnection(this.rtcPeerConnectionConfig);
         this.init();
     }
@@ -95,135 +117,60 @@ export class WebRTC {
                 });
             }
         };
-        this.peerConnection.ondatachannel = (event: RTCDataChannelEvent) => {
-            console.log('Received data channel');
-            event.channel.onopen = () => {
-                console.log('Data channel is open');
+        this.peerConnection.ontrack = (event: RTCTrackEvent) => {
+            this.remoteStream = event.streams;
+            event.track.onunmute = () => {
+                console.log('remote track unmuted');
             }
-            event.channel.onclose = () => {
-                console.log('Data channel is closed');
+            event.track.onmute = () => {
+                console.log('remote track muted');
             }
-            event.channel.onmessage = (event: MessageEvent) => {
-                console.log('Received message: ' + event.data);
+            event.track.onended = () => {
+                console.log('remote track ended');
             }
+            console.log('ontrack', event.track);
+        };
+
+        this.signaling.onOffer = (offerPeerId: string, offer: RTCSessionDescriptionInit) => {
+            this.onOffer(offerPeerId, offer);
+        }
+
+        this.signaling.onAnswer = (answerPeerId: string, answer: RTCSessionDescriptionInit) => {
+            this.onAnswer(answerPeerId, answer);
         }
     }
 
-    call(remotePeerId: string): Promise<MediaStream> {
-        return new Promise((resolve, reject) => {
-            this.getLocalMediaStream().then(l => {
-                if (!this.localStream) {
-                    reject('no local stream');
-                    return;
-                }
-                this.localStream.getTracks().forEach(track => {
-                    this.peerConnection!.addTrack(track, this.localStream!);
-                });
+    call(peerId: string): Promise<Dialing | null> {
+        if (!this.signaling.avaliable()) {
+            return Promise.reject("Signaling not avaliable");
+        }
 
-                this.peerConnection.ontrack = (event: RTCTrackEvent) => {
-                    this.remoteStream = event.streams[0];
-                    resolve(this.remoteStream);
-                };
+        return this.getLocalMediaStream()
+            .then((stream) => {
+                if (stream === null) {
+                    return null;
+                }
+                this.localStream = stream;
+                stream.getTracks().forEach(track => {
+                    this.peerConnection!.addTrack(track);
+                });
+                return stream;
+            }).then((stream) => {
                 this.peerConnection.createOffer().then(offer => {
                     this.peerConnection.setLocalDescription(offer);
-                    this.sendOffer(remotePeerId, offer);
+                    this.signaling.sendOffer(peerId, offer);
                 });
-            })
-        });
-    }
-
-    sendIceCandidate(remotePeerId: string, candidate: RTCIceCandidate) {
-        console.log('Sending ICE candidate to ' + remotePeerId);
-        this.sendMessage(remotePeerId, {
-            type: 'candidate',
-            candidate: candidate,
-        });
-    }
-
-    sendOffer(remotePeerId: string, offer: RTCSessionDescriptionInit) {
-        console.log('Sending offer to ' + remotePeerId);
-        console.log('Offer:' + JSON.stringify(offer));
-        const answer = prompt('offer created, copy in your browser console, Paste the answer in the prompt');
-        if (answer) {
-            this.peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(answer)));
-        }
-    }
-
-    mockAnswer(offer: string): Promise<MediaStream> {
-        return new Promise((resolve, reject) => {
-            this.peerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(offer)));
-            this.peerConnection.createAnswer().then(answer => {
-                this.peerConnection.setLocalDescription(answer);
-                console.log('Answer:\n' + JSON.stringify(answer));
-                alert('answer created copy in your browser console');
+                return new WsDialing(peerId, this.signaling as WsSignaling);
+            }).catch(error => {
+                console.error('Error getting local media stream', error);
+                return null;
             });
-            // if (!this.localStream) {
-            // reject('no local stream');
-            // return;
-            // }
-            // this.localStream.getTracks().forEach(track => {
-            //     this.peerConnection!.addTrack(track, this.localStream!);
-            // });
-
-            this.peerConnection.ontrack = (event: RTCTrackEvent) => {
-                this.remoteStream = event.streams[0];
-                resolve(this.remoteStream);
-            };
-        });
     }
 
     close() {
         if (this.peerConnection) {
             this.peerConnection.close();
         }
-    }
-
-    sendAnswer(remotePeerId: string) {
-        console.log('Sending answer to ' + remotePeerId);
-        this.peerConnection!.createAnswer().then(answer => {
-            this.peerConnection!.setLocalDescription(answer);
-            this.sendMessage(remotePeerId, {
-                type: 'answer',
-                answer: answer,
-            });
-        }
-        ).catch(error => {
-            console.error('Error creating answer', error);
-        });
-    }
-
-    handleMessage(remotePeerId: string, message: any) {
-        switch (message.type) {
-            case 'candidate':
-                this.peerConnection!.addIceCandidate(message.candidate).catch(error => {
-                    console.error('Error adding received ICE candidate', error);
-                }
-                );
-                break;
-            case 'offer':
-                this.peerConnection!.setRemoteDescription(message.offer).then(() => {
-                    this.sendAnswer(remotePeerId);
-                }
-                ).catch(error => {
-                    console.error('Error setting remote offer', error);
-                }
-                );
-                break;
-            case 'answer':
-                this.peerConnection!.setRemoteDescription(message.answer).catch(error => {
-                    console.error('Error setting remote answer', error);
-                }
-                );
-                break;
-            default:
-                console.error('Unrecognized message type: ' + message.type);
-                break;
-        }
-    }
-
-    sendMessage(remotePeerId: string, message: any) {
-        console.log('Sending message to ' + remotePeerId);
-
     }
 
     stopLocalMediaStream() {
@@ -233,14 +180,31 @@ export class WebRTC {
         }
     }
 
-    getLocalMediaStream() {
-        return navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-            .then(stream => {
-                this.localStream = stream;
-                return stream;
-            });
+    private onOffer(offerPeerId: string, offer: RTCSessionDescriptionInit) {
+        console.log('Received offer from ' + offerPeerId);
+
+
+        const answer: () => Promise<void> = async () => {
+
+            this.peerConnection!.setRemoteDescription(offer);
+
+            const answer = await this.peerConnection!.createAnswer();
+            this.peerConnection!.setLocalDescription(answer);
+            this.signaling.sendAnswer(offerPeerId, answer);
+        }
+        this.onOfferIncoming(offerPeerId, answer);
     }
 
-    openSignalingChannel(config: any) {
+    private onAnswer(answerPeerId: string, answer: RTCSessionDescriptionInit) {
+        console.log('Received answer from ' + answerPeerId);
+        this.peerConnection!.setRemoteDescription(answer).catch(error => {
+            console.error('Error setting remote description', error);
+        });
+        this.onAnswered(answerPeerId);
     }
+
+    async getLocalMediaStream() {
+        return await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    }
+
 }

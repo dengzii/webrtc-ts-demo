@@ -1,11 +1,12 @@
 import React, { useEffect, useRef } from 'react';
-import logo from './logo.svg';
 import './App.css';
-import { testWebRTC, WebRTC } from './webrtc/webrtc';
-import { Signling } from './webrtc/signaling';
+import { Call, Dialing, Incomming } from './webrtc/dialing';
+import { WsSignaling } from './webrtc/signaling';
+import { WebRTC } from './webrtc/webrtc';
 
 
 function App() {
+
 
 	const videoRef = useRef<HTMLVideoElement | null>(null);
 	const videoTargetRef = useRef<HTMLVideoElement | null>(null);
@@ -19,11 +20,30 @@ function App() {
 	const [hello, setHello] = React.useState(false);
 	const [updateFriendId, setUpdateFriendId] = React.useState(false);
 
-	const signaling = React.useMemo(() => new Signling(signalingUrl), [signalingUrl]);
-	const webRtc = React.useMemo(() => new WebRTC(), []);
+	const [incomming, setIncomming] = React.useState<Incomming | null>(null);
+	const [dialing, setDialing] = React.useState<Dialing | null>(null);
+	const [call, setCall] = React.useState<Call | null>(null);
+
+	const [rtcState, setRtcState] = React.useState<"idle" | "calling" | "incoming" | "connected">("idle");
+
+	const signaling = React.useMemo(() => new WsSignaling(signalingUrl), [signalingUrl]);
+
+	const webRTC = React.useMemo(() => new WebRTC(signaling), [signaling]);
+
+	useEffect(() => {
+		signaling.onIncomming = (peerId: string, i: Incomming) => {
+			i.onCancel = () => {
+				setIncomming(null);
+				setRtcState("idle");
+			}
+			setIncomming(i);
+			setRtcState("incoming");
+		}
+	}, [webRTC])
 
 	useEffect(() => {
 		console.log("init signaling");
+
 		signaling.logCallback = (l: string) => {
 			setLog([...log, l]);
 		}
@@ -49,17 +69,51 @@ function App() {
 		}
 	}, [signaling]);
 
-	const onCallClick = () => {
-		webRtc.call("").then((stream) => {
-			videoRef.current!.srcObject = stream;
-		});
-	}
-
-	const onAnswerClick = () => {
-		const offer = prompt("Enter Offer");
-		webRtc.mockAnswer(offer!).then((stream) => {
-			videoTargetRef.current!.srcObject = stream;
-		});
+	const onBtnClick = () => {
+		switch (rtcState) {
+			case "idle":
+				signaling.dialing(friendIdRef.current!.value)
+					.then((dialing) => {
+						setDialing(dialing);
+						setRtcState("calling");
+						dialing.onFail = (msg) => {
+							alert(msg);
+						}
+						dialing.onAccept = (c: Call) => {
+							c.onHangup = () => {
+								setRtcState("idle");
+							}
+							setCall(c);
+							setRtcState("connected");
+						}
+					}).catch((err) => {
+						alert(err);
+					});
+				break;
+			case "calling":
+				dialing?.cancel().then(() => {
+					setDialing(null);
+					setRtcState("idle");
+				});
+				break;
+			case "incoming":
+				incomming?.accept().then((call) => {
+					setCall(call);
+					call.onHangup = () => {
+						setRtcState("idle");
+					}
+					setRtcState("connected");
+				}).catch(e => {
+					setRtcState("idle");
+					alert("error" + e);
+				})
+				break;
+			case "connected":
+				call?.hangup().then(() => {
+					setRtcState("idle");
+				});
+				break;
+		}
 	}
 
 	const onConnectClick = () => {
@@ -69,6 +123,22 @@ function App() {
 	const onSayHelloClick = () => {
 		const to = friendIdRef.current!.value
 		signaling.helloToFriend(to)
+	}
+
+	let btnText = "";
+	switch (rtcState) {
+		case "idle":
+			btnText = "Dial";
+			break;
+		case "calling":
+			btnText = "Cancel";
+			break;
+		case "incoming":
+			btnText = "Answer";
+			break;
+		case "connected":
+			btnText = "Hangup";
+			break;
 	}
 
 	return (
@@ -82,8 +152,7 @@ function App() {
 					<small>Signling Server: </small><input type="text" ref={signalingRef} value={signalingUrl} /><button onClick={onConnectClick}>connect</button><br />
 					<small>Your ID: </small> <input type="text" ref={yourIdRef} /><br />
 					<small>Friend ID: </small> <input type="text" ref={friendIdRef} /> {updateFriendId ? <small>Updated</small> : <></>} <br />
-					<button onClick={onSayHelloClick}>Say Hello</button> {hello ? <small>Replyied</small> : <></>} <button onClick={onCallClick}>Call</button>
-					<button style={{ fontWeight: "bold" }}>Incoming, Click Anwser</button><br />
+					<button onClick={onBtnClick}>{btnText}</button><button onClick={onSayHelloClick}>Say Hello</button> {hello ? <small>Replyied</small> : <></>}<br />
 					<textarea style={{ width: "400px", height: "200px", wordBreak: "keep-all" }} defaultValue={log.join("\n")} />
 				</div>
 			</header >
