@@ -1,26 +1,28 @@
-import { Dialing, WsDialing } from "./dialing";
+import { Call, Dialing, WsDialing } from "./dialing";
 import { Signaling, WsSignaling } from "./signaling";
 
 export class Peer {
-    
+
     private peerConnection: RTCPeerConnection;
     private remoteStream: ReadonlyArray<MediaStream> | null = null;
     private signaling: Signaling;
+    peerId: string
 
     onTrack: (stream: ReadonlyArray<MediaStream>) => void = () => { };
 
-    private constructor(private config: RTCConfiguration, signaling: Signaling) {
+    private constructor(peerId: string, private config: RTCConfiguration, signaling: Signaling) {
         this.signaling = signaling;
+        this.peerId = peerId;
         this.peerConnection = new RTCPeerConnection(config);
     }
 
-    public static call(peerId: string, config: RTCConfiguration, signaling: Signaling) :Promise<Dialing|null> {
-        const peer = new Peer(config, signaling);
+    public static create(peerId: string, config: RTCConfiguration, signaling: Signaling): Peer {
+        const peer = new Peer(peerId, config, signaling);
         peer.init();
-        return peer.dial(peerId);
+        return peer;
     }
 
-    public init(){
+    public init() {
         this.peerConnection.onnegotiationneeded = () => {
             console.log('onnegotiationneeded');
         };
@@ -55,23 +57,34 @@ export class Peer {
         };
     }
 
-    public dial(peerId:string): Promise<Dialing|null> {
-        return new Promise((resolve, reject) => {
-            const dialing = new WsDialing(peerId, this.signaling as WsSignaling);
-            resolve(dialing);
-        })
+    public close() {
+
     }
 
-    public call(peerId:string) {
-         this.peerConnection.createOffer();
-         this.peerConnection.createOffer().then(offer => {
+    public onAnswer(answer: RTCSessionDescriptionInit) {
+        this.peerConnection!.setRemoteDescription(answer).catch(error => {
+            console.error('Error setting remote description', error);
+        });
+    }
+
+    public sendAnswer(offer: RTCSessionDescriptionInit) {
+        this.peerConnection!.setRemoteDescription(offer);
+        this.peerConnection!.createAnswer().then(answer => {
+            this.peerConnection!.setLocalDescription(answer);
+            this.signaling.sendAnswer(this.peerId, answer);
+        });
+    }
+
+    public sendOffer() {
+        this.peerConnection.createOffer();
+        this.peerConnection.createOffer().then(offer => {
             this.peerConnection.setLocalDescription(offer);
-            this.signaling.sendOffer(peerId, offer);
+            this.signaling.sendOffer(this.peerId, offer);
         });
     }
 
     public addStream(stream: MediaStream) {
-        stream.getTracks().forEach( (track:MediaStreamTrack)=>{
+        stream.getTracks().forEach((track: MediaStreamTrack) => {
             this.peerConnection.addTrack(track, stream);
         })
     }

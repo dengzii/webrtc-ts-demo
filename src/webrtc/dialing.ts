@@ -1,7 +1,8 @@
 import { SignalingMessage, SignalingType, WsSignaling } from "./signaling";
 
 export interface PeerInfo {
-    Id: string
+    id: string
+    sdp?: any | null
 }
 
 export interface Dialing {
@@ -13,7 +14,7 @@ export interface Dialing {
 }
 
 export interface Incomming {
-    peer: PeerInfo;
+    peerInfo: PeerInfo;
 
     accept(): Promise<Call>;
     reject(): Promise<void>;
@@ -40,7 +41,7 @@ export class WsCall implements Call {
         this.removeMessageListener = this.signaling.addMessageListener((m: SignalingMessage) => {
             if (m.type === SignalingType.Hangup) {
                 const peerInfo = JSON.parse(m.content) as PeerInfo
-                if (peerInfo.Id == this.peer.Id) {
+                if (peerInfo.id == this.peer.id) {
                     this.removeMessageListener()
                     this.onHangup();
                 }
@@ -52,10 +53,10 @@ export class WsCall implements Call {
         this.removeMessageListener()
 
         const p: PeerInfo = {
-            Id: this.signaling.myId!!
+            id: this.signaling.myId!!
         }
 
-        return this.signaling.sendMessage(this.peer.Id, {
+        return this.signaling.sendMessage(this.peer.id, {
             type: SignalingType.Hangup,
             content: JSON.stringify(p),
         });
@@ -82,7 +83,7 @@ export class WsDialing implements Dialing {
     constructor(peerId: string, s: WsSignaling) {
         this.peerId = peerId;
         this.myInfo = {
-            Id: s.myId!!
+            id: s.myId!!,
         };
         this.signaling = s;
     }
@@ -108,7 +109,7 @@ export class WsDialing implements Dialing {
             this.removeMessageListener = this.signaling.addMessageListener((m: SignalingMessage) => {
                 if (m.type === SignalingType.Accept) {
                     const peerInfo = JSON.parse(m.content) as PeerInfo
-                    if (peerInfo.Id == this.peerId) {
+                    if (peerInfo.id == this.peerId) {
                         this.accepted = true;
                         this.signaling.deleteIncomming(this.peerId)
                         this.callTimer && clearInterval(this.callTimer!!);
@@ -117,7 +118,7 @@ export class WsDialing implements Dialing {
                     }
                 } else if (m.type === SignalingType.Reject) {
                     const peerInfo = JSON.parse(m.content) as PeerInfo
-                    if (peerInfo.Id == this.peerId) {
+                    if (peerInfo.id == this.peerId) {
                         this.signaling.deleteIncomming(this.peerId)
                         this.callTimer && clearInterval(this.callTimer!!);
                         this.removeMessageListener()
@@ -165,11 +166,11 @@ export class WsIncomming implements Incomming {
     private removeMessageListener: () => void;
     private timeout: NodeJS.Timer | null = null;
 
-    peer: PeerInfo;
+    peerInfo: PeerInfo;
     onCancel: () => void = () => { };
 
     constructor(peer: PeerInfo, signaling: WsSignaling) {
-        this.peer = peer;
+        this.peerInfo = peer;
         this.signaling = signaling;
 
         this.checkActive()
@@ -177,16 +178,16 @@ export class WsIncomming implements Incomming {
         this.removeMessageListener = signaling.addMessageListener((m: SignalingMessage) => {
             if (m.type === SignalingType.Dialing) {
                 const peerInfo = JSON.parse(m.content) as PeerInfo
-                if (peerInfo.Id == this.peer.Id) {
+                if (peerInfo.id == this.peerInfo.id) {
                     this.checkActive()
                 }
             } else if (m.type === SignalingType.Cancel) {
                 const peerInfo = JSON.parse(m.content) as PeerInfo
-                if (peerInfo.Id == this.peer.Id) {
+                if (peerInfo.id == this.peerInfo.id) {
                     this.removeMessageListener()
                     this.timeout && clearInterval(this.timeout!!);
                     this.onCancel()
-                    this.signaling.deleteIncomming(this.peer.Id)
+                    this.signaling.deleteIncomming(this.peerInfo.id)
                 }
             }
         })
@@ -197,20 +198,20 @@ export class WsIncomming implements Incomming {
 
         this.timeout = setTimeout(() => {
             this.onCancel();
-            this.signaling.deleteIncomming(this.peer.Id)
+            this.signaling.deleteIncomming(this.peerInfo.id)
             this.removeMessageListener()
         }, 2000);
     }
 
     accept(): Promise<Call> {
         const myInfo: PeerInfo = {
-            Id: this.signaling.myId!!
+            id: this.signaling.myId!!
         }
-        return this.signaling.sendSignaling(this.peer.Id, SignalingType.Accept, myInfo)
+        return this.signaling.sendSignaling(this.peerInfo.id, SignalingType.Accept, myInfo)
             .then(() => {
                 this.removeMessageListener()
                 this.timeout && clearInterval(this.timeout!!);
-                return new WsCall(this.peer, this.signaling)
+                return new WsCall(this.peerInfo, this.signaling)
             });
     }
 
@@ -220,6 +221,6 @@ export class WsIncomming implements Incomming {
 
         // this.signaling.deleteIncomming(this.peer.Id)
 
-        return this.signaling.sendSignaling(this.peer.Id, SignalingType.Reject, { Id: this.signaling.myId })
+        return this.signaling.sendSignaling(this.peerInfo.id, SignalingType.Reject, { Id: this.signaling.myId })
     }
 }

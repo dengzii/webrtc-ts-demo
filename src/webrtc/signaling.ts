@@ -2,19 +2,19 @@ import { json } from "stream/consumers";
 import { Call, Dialing, Incomming, WsDialing, WsIncomming } from "./dialing";
 
 export enum SignalingType {
-    Hi = 1,
-    Hello = 2,
+    Hi = "hi",
+    Hello = "hello",
 
-    Dialing = 10,
-    Accept = 20,
-    Reject = 30,
-    Hangup = 40,
-    Cancel = 50,
+    Dialing = "dialing",
+    Accept = "accept",
+    Reject = "reject",
+    Hangup = "hanup",
+    Cancel = "cancel",
 
-    Offer = 100,
-    Answer = 200,
-    Ice = 300,
-    Close = 400,
+    Offer = "webrtc_offer",
+    Answer = "webrtc_answer",
+    Ice = "webrtc_ice",
+    Close = "webrtc_close",
 }
 
 interface Message {
@@ -26,7 +26,7 @@ interface Message {
 }
 
 export interface SignalingMessage {
-    type: number;
+    type: string;
     content: string;
 }
 
@@ -38,7 +38,6 @@ interface Hello {
 
 export interface Signaling {
     avaliable(): boolean;
-    dialing(peerId: string): Promise<Dialing>;
     sendOffer(peerId: string, offer: RTCSessionDescriptionInit): Promise<void>;
     sendAnswer(peerId: string, answer: RTCSessionDescriptionInit): Promise<void>;
     onIncomming: (peerId: string, incoming: Incomming) => void;
@@ -76,13 +75,6 @@ export class WsSignaling implements Signaling {
         this.startHeartbeat();
     }
 
-    dialing(peerId: string): Promise<Dialing> {
-        const dialing = new WsDialing(peerId, this);
-        return dialing.dial().then(() => {
-            return dialing;
-        });
-    }
-
     avaliable(): boolean {
         return this.ws.readyState === WebSocket.OPEN && this.myId !== null;
     }
@@ -93,6 +85,7 @@ export class WsSignaling implements Signaling {
             content: JSON.stringify(offer)
         });
     }
+
     sendAnswer(peerId: string, answer: RTCSessionDescriptionInit): Promise<void> {
         return this.sendMessage(peerId, {
             type: SignalingType.Answer,
@@ -136,12 +129,12 @@ export class WsSignaling implements Signaling {
 
     public helloToFriend(id: string, replay: boolean = false) {
         this.sendMessage(id, {
-            type: replay ? 2 : 1,
+            type: replay ? SignalingType.Hello : SignalingType.Hi,
             content: this.myId!!
         }).then()
     }
 
-    public sendSignaling(to: string, type: number, content: any): Promise<void> {
+    public sendSignaling(to: string, type: SignalingType, content: any): Promise<void> {
         return this.sendMessage(to, {
             type: type,
             content: JSON.stringify(content)

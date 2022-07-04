@@ -16,7 +16,7 @@ function App() {
 
 	const [log, setLog] = React.useState<string[]>([])
 
-	const [signalingUrl, setSignalingUrl] = React.useState("ws://localhost:8080/ws");
+	const [signalingUrl, setSignalingUrl] = React.useState("ws://ws.glide-im.pro/ws");
 	const [hello, setHello] = React.useState(false);
 	const [updateFriendId, setUpdateFriendId] = React.useState(false);
 
@@ -31,13 +31,23 @@ function App() {
 	const webRTC = React.useMemo(() => new WebRTC(signaling), [signaling]);
 
 	useEffect(() => {
-		signaling.onIncomming = (peerId: string, i: Incomming) => {
+		webRTC.onIncoming = (peerId: string, i: Incomming) => {
 			i.onCancel = () => {
 				setIncomming(null);
 				setRtcState("idle");
 			}
 			setIncomming(i);
 			setRtcState("incoming");
+		}
+		webRTC.onLocalStreamChanged = (stream: MediaStream | null) => {
+			if (videoRef.current) {
+				videoRef.current.srcObject = stream;
+				if (stream !== null) {
+					videoRef.current.play();
+				} else {
+					videoRef.current.pause();
+				}
+			}
 		}
 	}, [webRTC])
 
@@ -72,7 +82,7 @@ function App() {
 	const onBtnClick = () => {
 		switch (rtcState) {
 			case "idle":
-				signaling.dialing(friendIdRef.current!.value)
+				webRTC.call(friendIdRef.current!.value)
 					.then((dialing) => {
 						setDialing(dialing);
 						setRtcState("calling");
