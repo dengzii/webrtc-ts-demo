@@ -163,7 +163,7 @@ function App() {
 					<video ref={videoTargetRef} width="200" height="200" controls style={{ float: "right" }} />
 				</div>
 				<div>
-					<small>Signling Server: </small><input type="text" ref={signalingRef} value={signalingUrl} /><button onClick={onConnectClick}>connect</button><br />
+					<small>Signling Server: </small><input type="text" ref={signalingRef} defaultValue={signalingUrl} /><button onClick={onConnectClick}>connect</button><br />
 					<small>Your ID: </small> <input type="text" ref={yourIdRef} /><br />
 					<small>Friend ID: </small> <input type="text" ref={friendIdRef} /> {updateFriendId ? <small>Updated</small> : <></>} <br />
 					<button onClick={onBtnClick}>{btnText}</button>

@@ -1,5 +1,6 @@
 import { off } from "process";
 import { Call, Dialing, WsDialing } from "./dialing";
+import { Peer } from "./peer";
 import { Signaling, WsSignaling } from "./signaling";
 
 let iceServer: RTCIceServer[] = [
@@ -79,9 +80,10 @@ export class WebRTC {
 
     private localStream: MediaStream | null = null;
     private remoteStream: ReadonlyArray<MediaStream> | null = null;
-    private peerConnection: RTCPeerConnection;
+    private peers = new Map<string, RTCPeerConnection>();
     private rtcPeerConnectionConfig: RTCConfiguration = {};
 
+    private peer :Peer|null = null;
     private signaling: Signaling
 
     onOfferIncoming: (peerId: string, answer: () => Promise<void>) => void = () => { };
@@ -95,41 +97,10 @@ export class WebRTC {
             rtcpMuxPolicy: 'require',
         };
         this.signaling = signling;
-        this.peerConnection = new RTCPeerConnection(this.rtcPeerConnectionConfig);
         this.init();
     }
 
     private init() {
-        this.peerConnection.onnegotiationneeded = () => {
-            console.log('onnegotiationneeded');
-        };
-        this.peerConnection.onsignalingstatechange = () => {
-            console.log('Signaling state changed to: ' + this.peerConnection!.signalingState);
-        }
-        this.peerConnection.onconnectionstatechange = () => {
-            console.log('Connection state changed to: ' + this.peerConnection!.connectionState);
-        };
-        this.peerConnection.onicecandidate = (event: RTCPeerConnectionIceEvent) => {
-            if (event.candidate) {
-                console.log('icecandidate event: ', event.candidate);
-                this.peerConnection.addIceCandidate(event.candidate).catch(error => {
-                    console.log('Error adding candidate: ' + error);
-                });
-            }
-        };
-        this.peerConnection.ontrack = (event: RTCTrackEvent) => {
-            this.remoteStream = event.streams;
-            event.track.onunmute = () => {
-                console.log('remote track unmuted');
-            }
-            event.track.onmute = () => {
-                console.log('remote track muted');
-            }
-            event.track.onended = () => {
-                console.log('remote track ended');
-            }
-            console.log('ontrack', event.track);
-        };
 
         this.signaling.onOffer = (offerPeerId: string, offer: RTCSessionDescriptionInit) => {
             this.onOffer(offerPeerId, offer);
@@ -145,32 +116,22 @@ export class WebRTC {
             return Promise.reject("Signaling not avaliable");
         }
 
-        return this.getLocalMediaStream()
+        this.peer = new Peer(this.rtcPeerConnectionConfig, this.signaling);
+
+        this.getLocalMediaStream()
             .then((stream) => {
                 if (stream === null) {
                     return null;
                 }
+                this.peer?.addStream(stream);
                 this.localStream = stream;
-                stream.getTracks().forEach(track => {
-                    this.peerConnection!.addTrack(track);
-                });
                 return stream;
-            }).then((stream) => {
-                this.peerConnection.createOffer().then(offer => {
-                    this.peerConnection.setLocalDescription(offer);
-                    this.signaling.sendOffer(peerId, offer);
-                });
-                return new WsDialing(peerId, this.signaling as WsSignaling);
-            }).catch(error => {
-                console.error('Error getting local media stream', error);
-                return null;
             });
+        return this.peer.dial(peerId);
     }
 
     close() {
-        if (this.peerConnection) {
-            this.peerConnection.close();
-        }
+        
     }
 
     stopLocalMediaStream() {
