@@ -1,32 +1,50 @@
 import React, { useEffect, useRef } from 'react';
 import './App.css';
-import { Call, Dialing, Incomming } from './webrtc/dialing';
+import { Dialing, Dialog, Incomming } from './webrtc/dialing';
+import { setLogCb } from './webrtc/log';
 import { WsSignaling } from './webrtc/signaling';
 import { WebRTC } from './webrtc/webrtc';
 
 
 function App() {
 
+	return <div className="App">
+		<header className="App-header">
+			<WebRtcDemo ws='wss://ws.glide-im.pro/ws' />
+			<Logger />
+		</header>
+	</div>;
+}
+
+function Logger() {
+	const [log, setLog] = React.useState<string[]>([])
+
+	useEffect(() => {
+		setLogCb(l => {
+			setLog([l, ...log]);
+		})
+	}, [log])
+
+	return < textarea style={{ width: "400px", height: "200px", wordBreak: "keep-all" }} defaultValue={log.join("\n")} />
+}
+
+function WebRtcDemo(props: { ws: string }) {
 
 	const videoRef = useRef<HTMLVideoElement | null>(null);
 	const videoTargetRef = useRef<HTMLVideoElement | null>(null);
-	const signalingRef = useRef<HTMLInputElement | null>(null);
 	const friendIdRef = useRef<HTMLInputElement | null>(null);
 	const yourIdRef = useRef<HTMLInputElement | null>(null);
 
-	const [log, setLog] = React.useState<string[]>([])
-
-	const [signalingUrl, setSignalingUrl] = React.useState("ws://ws.glide-im.pro/ws");
 	const [hello, setHello] = React.useState(false);
 	const [updateFriendId, setUpdateFriendId] = React.useState(false);
 
 	const [incomming, setIncomming] = React.useState<Incomming | null>(null);
 	const [dialing, setDialing] = React.useState<Dialing | null>(null);
-	const [call, setCall] = React.useState<Call | null>(null);
+	const [call, setCall] = React.useState<Dialog | null>(null);
 
 	const [rtcState, setRtcState] = React.useState<"idle" | "calling" | "incoming" | "connected">("idle");
 
-	const signaling = React.useMemo(() => new WsSignaling(signalingUrl), [signalingUrl]);
+	const signaling = React.useMemo(() => new WsSignaling(props.ws), [props.ws]);
 
 	const webRTC = React.useMemo(() => new WebRTC(signaling), [signaling]);
 
@@ -54,9 +72,6 @@ function App() {
 	useEffect(() => {
 		console.log("init signaling");
 
-		signaling.logCallback = (l: string) => {
-			setLog([...log, l]);
-		}
 		signaling.setIdCallback((id: string) => {
 			yourIdRef.current!.value = id;
 		})
@@ -79,6 +94,26 @@ function App() {
 		}
 	}, [signaling]);
 
+	const handleDialog = (dialog: Dialog) => {
+		dialog.onRemoteTrack((r: RTCTrackEvent) => {
+			if (videoTargetRef.current) {
+				videoTargetRef.current.srcObject = r.streams[0];
+				videoTargetRef.current.play();
+			}
+		})
+		dialog.onHangup = () => {
+			videoRef.current?.pause()
+			videoRef.current!.srcObject = null;
+			setRtcState("idle");
+		}
+		dialog.openMedia().then((stream) => {
+			videoRef.current!.srcObject = stream;
+			videoRef.current!.play();
+		})
+		setCall(dialog);
+		setRtcState("connected");
+	}
+
 	const onBtnClick = () => {
 		switch (rtcState) {
 			case "idle":
@@ -92,12 +127,8 @@ function App() {
 						dialing.onReject = () => {
 							setRtcState("idle");
 						}
-						dialing.onAccept = (c: Call) => {
-							c.onHangup = () => {
-								setRtcState("idle");
-							}
-							setCall(c);
-							setRtcState("connected");
+						dialing.onAccept = (c: Dialog) => {
+							handleDialog(c);
 						}
 					}).catch((err) => {
 						alert(err);
@@ -111,11 +142,7 @@ function App() {
 				break;
 			case "incoming":
 				incomming?.accept().then((call) => {
-					setCall(call);
-					call.onHangup = () => {
-						setRtcState("idle");
-					}
-					setRtcState("connected");
+					handleDialog(call);
 				}).catch(e => {
 					setRtcState("idle");
 					alert("error" + e);
@@ -127,10 +154,6 @@ function App() {
 				});
 				break;
 		}
-	}
-
-	const onConnectClick = () => {
-		setSignalingUrl(signalingRef.current!.value);
 	}
 
 	const onSayHelloClick = () => {
@@ -165,25 +188,20 @@ function App() {
 			break;
 	}
 
-	return (
-		<div className="App">
-			<header className="App-header">
-				<div style={{ width: "410px", height: "200px" }}>
-					<video ref={videoRef} width="200" height="200" controls style={{ float: "left" }} />
-					<video ref={videoTargetRef} width="200" height="200" controls style={{ float: "right" }} />
-				</div>
-				<div>
-					<small>Signling Server: </small><input type="text" ref={signalingRef} defaultValue={signalingUrl} /><button onClick={onConnectClick}>connect</button><br />
-					<small>Your ID: </small> <input type="text" ref={yourIdRef} /><br />
-					<small>Friend ID: </small> <input type="text" ref={friendIdRef} /> {updateFriendId ? <small>Updated</small> : <></>} <br />
-					<button onClick={onBtnClick}>{btnText}</button>
-					{rtcState === "incoming" ? <button onClick={onRejectClick}>Reject</button> : <></>}
+	return (<>
+		<div style={{ width: "410px", height: "200px" }}>
+			<video ref={videoRef} width="200" height="200" controls style={{ float: "left" }} />
+			<video ref={videoTargetRef} width="200" height="200" controls style={{ float: "right" }} />
+		</div>
+		<div>
+			<small>Your ID: </small> <input type="text" ref={yourIdRef} /><br />
+			<small>Friend ID: </small> <input type="text" ref={friendIdRef} /> {updateFriendId ? <small>Updated</small> : <></>} <br />
+			<button onClick={onBtnClick}>{btnText}</button>
+			{rtcState === "incoming" ? <button onClick={onRejectClick}>Reject</button> : <></>}
 
-					<button onClick={onSayHelloClick}>Say Hello</button> {hello ? <small>Replyied</small> : <></>}<br />
-					<textarea style={{ width: "400px", height: "200px", wordBreak: "keep-all" }} defaultValue={log.join("\n")} />
-				</div>
-			</header >
-		</div >
+			<button onClick={onSayHelloClick}>Say Hello</button> {hello ? <small>Replyied</small> : <></>}<br />
+		</div>
+	</>
 	);
 }
 

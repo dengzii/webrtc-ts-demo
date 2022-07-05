@@ -1,5 +1,5 @@
-import { json } from "stream/consumers";
-import { Call, Dialing, Incomming, WsDialing, WsIncomming } from "./dialing";
+import { Incomming, PeerInfo, WsIncomming } from "./dialing";
+import { mLog } from "./log";
 
 export enum SignalingType {
     Hi = "hi",
@@ -15,6 +15,7 @@ export enum SignalingType {
     Answer = "webrtc_answer",
     Ice = "webrtc_ice",
     Close = "webrtc_close",
+    Candidate = "webrtc_caditate",
 }
 
 interface Message {
@@ -27,7 +28,12 @@ interface Message {
 
 export interface SignalingMessage {
     type: string;
-    content: string;
+    content: any;
+}
+
+export interface DspMessage {
+    peerId: string;
+    sdp: any;
 }
 
 interface Hello {
@@ -40,7 +46,7 @@ export interface Signaling {
     avaliable(): boolean;
     sendOffer(peerId: string, offer: RTCSessionDescriptionInit): Promise<void>;
     sendAnswer(peerId: string, answer: RTCSessionDescriptionInit): Promise<void>;
-    onIncomming: (peerId: string, incoming: Incomming) => void;
+    onIncomming: (peerInfo: PeerInfo, incoming: Incomming) => void;
     onOffer: (peerId: string, offer: RTCSessionDescriptionInit) => void;
     onAnswer: (peerId: string, answer: RTCSessionDescriptionInit) => void;
 }
@@ -54,12 +60,12 @@ export class WsSignaling implements Signaling {
     private seq = 0;
     private idCallback: (id: string) => void = () => { }
 
-    private messageListeners: Array<(m: SignalingMessage) => void> = new Array();
+    private messageListeners: ((m: SignalingMessage) => void)[] = [];
     private incommings = new Map<string, Incomming>();
 
     myId: string | null = null;
 
-    onIncomming: (peerId: string, incoming: Incomming) => void = () => { }
+    onIncomming: (peerInfo: PeerInfo, incoming: Incomming) => void = () => { }
     onOffer: (peerId: string, offer: RTCSessionDescriptionInit) => void = () => { };
     onAnswer: (peerId: string, answer: RTCSessionDescriptionInit) => void = () => { };
     onHelloCallback: (id: string, replay: boolean) => void = () => { }
@@ -79,17 +85,27 @@ export class WsSignaling implements Signaling {
         return this.ws.readyState === WebSocket.OPEN && this.myId !== null;
     }
 
-    sendOffer(peerId: string, offer: RTCSessionDescriptionInit): Promise<void> {
+    sendOffer(peerId: string, dsp: RTCSessionDescriptionInit): Promise<void> {
+        mLog("signaling", 'send offer: ' + peerId);
+        const cnt: DspMessage = {
+            peerId: peerId,
+            sdp: dsp,
+        }
         return this.sendMessage(peerId, {
             type: SignalingType.Offer,
-            content: JSON.stringify(offer)
+            content: cnt,
         });
     }
 
     sendAnswer(peerId: string, answer: RTCSessionDescriptionInit): Promise<void> {
+        mLog("signaling", 'send answer: ' + peerId);
+        const cnt: DspMessage = {
+            peerId: peerId,
+            sdp: answer,
+        }
         return this.sendMessage(peerId, {
             type: SignalingType.Answer,
-            content: JSON.stringify(answer)
+            content: cnt,
         });
     }
 
@@ -157,7 +173,7 @@ export class WsSignaling implements Signaling {
             if (this.ws.readyState !== WebSocket.OPEN) {
                 reject(new Error("WebSocket is not open"))
             } else {
-                this.beautifulLog('send: ' + JSON.stringify(message));
+                mLog("signaling", 'send: ' + message.action);
                 this.ws.send(JSON.stringify(message));
                 resolve(message);
             }
@@ -176,7 +192,6 @@ export class WsSignaling implements Signaling {
 
     private onMessage(messageEvent: MessageEvent) {
         const message: Message = JSON.parse(messageEvent.data as string);
-        this.beautifulLog('message: ' + messageEvent.data);
 
         switch (message.action) {
             case "message.cli":
@@ -192,10 +207,18 @@ export class WsSignaling implements Signaling {
     }
 
     private onSignalingMessage(m: SignalingMessage) {
-        this.beautifulLog('onSignalingMessage: ' + JSON.stringify(m));
+        mLog("signaling", 'on signaling: ' + m.type);
         this.messageListeners.forEach(l => l(m));
 
         switch (m.type) {
+            case SignalingType.Offer:
+                const offer: DspMessage = JSON.parse(m.content);
+                this.onOffer(offer.peerId, offer.sdp);
+                break
+            case SignalingType.Answer:
+                const answer: DspMessage = JSON.parse(m.content);
+                this.onAnswer(answer.peerId, answer.sdp);
+                break
             case SignalingType.Hi:
                 this.helloToFriend(m.content, true);
                 this.onHelloCallback(m.content, false)
@@ -204,32 +227,27 @@ export class WsSignaling implements Signaling {
                 this.onHelloCallback(m.content, true)
                 break;
             case SignalingType.Dialing:
-                const peer = JSON.parse(m.content);
-                if (!this.incommings.has(peer.Id)) {
+                const peer = JSON.parse(m.content) as PeerInfo;
+                if (!this.incommings.has(peer.id)) {
                     const incomming = new WsIncomming(peer, this);
-                    this.incommings.set(peer.Id, incomming);
-                    this.onIncomming(peer.Id, incomming);
+                    this.incommings.set(peer.id, incomming);
+                    this.onIncomming(peer, incomming);
                 }
         }
     }
 
     private onError(errorEvent: Event) {
         this.myId = null;
-        this.beautifulLog('error, ' + errorEvent);
+        mLog("signaling", 'error, ' + errorEvent);
     }
 
     private onClose(closeEvent: CloseEvent) {
         this.myId = null;
-        this.beautifulLog('disconnected, ' + closeEvent);
+        mLog("signaling", 'disconnected: ' + closeEvent.code + "," + closeEvent.reason);
     }
 
     private onOpen() {
         this.myId = null;
-        this.beautifulLog('connected');
-    }
-
-    private beautifulLog(message: string) {
-        this.logCallback("Signaling: " + message)
-        console.log('%s %c%s', 'Signaling', 'color: #000000; font-weight: bold;', message);
+        mLog("signaling", 'connected');
     }
 }

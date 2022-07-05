@@ -1,10 +1,8 @@
-import { off } from "process";
-import { isCommaListExpression } from "typescript";
-import { Call, Dialing, Incomming, WsDialing } from "./dialing";
+import { Dialing, Incomming, PeerInfo, WsDialing } from "./dialing";
 import { Peer } from "./peer";
 import { Signaling, WsSignaling } from "./signaling";
 
-let iceServer: RTCIceServer[] = [
+export let iceServer: RTCIceServer[] = [
     {
         urls: 'turn:openrelay.metered.ca:80',
         username: 'openrelayproject',
@@ -25,9 +23,12 @@ let iceServer: RTCIceServer[] = [
     },
 ]
 
-export function setIceServer(iceServer: RTCIceServer[]) {
-    iceServer = iceServer;
-}
+export const rtcConfig: RTCConfiguration = {
+    iceServers: iceServer,
+    iceCandidatePoolSize: 10,
+    bundlePolicy: 'max-compat',
+    rtcpMuxPolicy: 'require',
+};
 
 export async function testWebRTC(s: (stream: MediaStream) => void): Promise<MediaStream> {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -79,10 +80,6 @@ function connectionPeer(stream: MediaStream, s: (stream: MediaStream) => void) {
 
 export class WebRTC {
 
-    private localStream: MediaStream | null = null;
-    private peers = new Map<string, RTCPeerConnection>();
-    private rtcPeerConnectionConfig: RTCConfiguration = {};
-
     private peer: Peer | null = null;
     private signaling: Signaling
 
@@ -91,29 +88,13 @@ export class WebRTC {
     onRemoteStreamChanged: ((stream: MediaStream | null) => void) = () => { }
 
     constructor(signling: Signaling) {
-        this.rtcPeerConnectionConfig = {
-            iceServers: iceServer,
-            iceCandidatePoolSize: 10,
-            bundlePolicy: 'max-bundle',
-            rtcpMuxPolicy: 'require',
-        };
         this.signaling = signling;
         this.init();
     }
 
     private init() {
-        this.signaling.onIncomming = (peerId: string, incoming: Incomming) => {
-
-            this.onIncoming(peerId, {
-                peerInfo: incoming.peerInfo,
-                accept: () => {
-                    this.peer = Peer.create(peerId, this.rtcPeerConnectionConfig, this.signaling);
-                    this.initPeer();
-                    return incoming.accept();
-                },
-                reject: incoming.reject,
-                onCancel: incoming.onCancel,
-            });
+        this.signaling.onIncomming = (peerInfo: PeerInfo, incoming: Incomming) => {
+            this.onIncoming(peerInfo.id, incoming);
         }
 
         this.signaling.onOffer = (offerPeerId: string, offer: RTCSessionDescriptionInit) => {
@@ -135,66 +116,6 @@ export class WebRTC {
         }
 
         const dialing = new WsDialing(peerId, this.signaling as WsSignaling);
-
-        this.peer = Peer.create(peerId, this.rtcPeerConnectionConfig, this.signaling);
-        this.initPeer();
-
-        this.attachLocalStream();
-
-        return dialing.dial().then(() => {
-            const wrap: Dialing = {
-                peerId: peerId,
-                cancel: () => {
-                    this.close()
-                    return dialing.cancel();
-                },
-                onFail: (err: string) => { },
-                onAccept: (call: Call) => { },
-                onReject: () => { },
-            }
-            dialing.onFail = (reason: string) => {
-                this.close()
-                wrap.onFail(reason);
-            }
-            dialing.onAccept = (call: Call) => {
-                this.peer?.sendOffer();
-                wrap.onAccept(call);
-            }
-            dialing.onReject = () => {
-                this.close()
-                wrap.onReject();
-            }
-            return wrap;
-        });
-    }
-
-    close() {
-        this.onLocalStreamChanged(null);
-        this.localStream = null;
-        this.peer?.close();
-        this.peer = null;
-    }
-
-
-    private attachLocalStream() {
-        if (this.localStream != null && this.localStream.active) {
-            this.peer?.addStream(this.localStream);
-        } else {
-            navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-                .then(stream => {
-                    this.onLocalStreamChanged(stream);
-                    this.localStream = stream;
-                    this.peer?.addStream(stream);
-                })
-                .catch(err => {
-                    console.error(err);
-                })
-        }
-    }
-
-    private initPeer() {
-        this.peer!!.onTrack = (stream: ReadonlyArray<MediaStream>) => {
-            this.onRemoteStreamChanged(stream[0]);
-        }
+        return dialing.dial();
     }
 }
