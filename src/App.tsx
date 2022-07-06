@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import './App.css';
 import { Dialing, Dialog, Incomming } from './webrtc/dialing';
-import { setLogCb } from './webrtc/log';
+import { mLog, setLogCb } from './webrtc/log';
 import { WsSignaling } from './webrtc/signaling';
 import { rtcConfig, setRtcConfig, WebRTC } from './webrtc/webrtc';
 
@@ -11,9 +11,10 @@ interface AppConfig {
 }
 
 const defaultConfig: AppConfig = {
-	signalingUrl: 'ws://localhost:8080/ws',
+	signalingUrl: 'wss://ws.glide-im.pro/ws',
 	rtcConfig: rtcConfig
 }
+
 
 function App() {
 
@@ -26,8 +27,8 @@ function App() {
 
 	return <div className="App">
 		<header className="App-header">
-			{config == defaultConfig
-				? <Configure callback={applyConfig} />
+			{config === null
+				? <Configure default={config} callback={applyConfig} />
 				: <>
 					<WebRtcDemo ws={config.signalingUrl} />
 					<Logger /></>
@@ -36,7 +37,7 @@ function App() {
 	</div>;
 }
 
-function Configure(props: { callback: (config: AppConfig) => void }) {
+function Configure(props: { default: any, callback: (config: AppConfig) => void }) {
 
 	const textRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -48,7 +49,7 @@ function Configure(props: { callback: (config: AppConfig) => void }) {
 
 	return <>
 		<p>请输入配置信息</p>
-		<textarea ref={textRef} defaultValue={JSON.stringify(defaultConfig)} style={{ width: "400px", height: "300px" }} />
+		<textarea ref={textRef} defaultValue={JSON.stringify(props.default)} style={{ width: "400px", height: "300px" }} />
 		<button onClick={onApply}>应用</button>
 	</>
 }
@@ -87,6 +88,11 @@ function WebRtcDemo(props: { ws: string }) {
 
 	useEffect(() => {
 		webRTC.onIncoming = (peerId: string, i: Incomming) => {
+			i.peer.onTrack = (track: RTCTrackEvent) => {
+				videoTargetRef.current!.srcObject = track.streams[0];
+				videoTargetRef.current!.play()
+			}
+
 			i.onCancel = () => {
 				setIncomming(null);
 				setRtcState("idle");
@@ -107,8 +113,6 @@ function WebRtcDemo(props: { ws: string }) {
 	}, [webRTC])
 
 	useEffect(() => {
-		console.log("init signaling");
-
 		signaling.setIdCallback((id: string) => {
 			yourIdRef.current!.value = id;
 		})
@@ -132,17 +136,11 @@ function WebRtcDemo(props: { ws: string }) {
 	}, [signaling]);
 
 	const handleDialog = (dialog: Dialog) => {
-		dialog.onRemoteTrack((r: RTCTrackEvent) => {
-			if (videoTargetRef.current) {
-				videoTargetRef.current.srcObject = r.streams[0];
-				videoTargetRef.current.play();
-			}
-		})
 		dialog.onHangup = () => {
-			videoRef.current!.srcObject = null;
 			videoRef.current?.pause()
-			videoTargetRef.current!.srcObject = null;
 			videoTargetRef.current?.pause()
+			videoRef.current!.srcObject = null;
+			videoTargetRef.current!.srcObject = null;
 			setRtcState("idle");
 		}
 		setCall(dialog);
@@ -155,9 +153,9 @@ function WebRtcDemo(props: { ws: string }) {
 				webRTC.call(friendIdRef.current!.value)
 					.then((dialing) => {
 
-						if (dialing.peer.localStream !== null) {
-							videoRef.current!.srcObject = dialing.peer.localStream;
-							videoRef.current!.play();
+						dialing.peer.onTrack = (track: RTCTrackEvent) => {
+							videoTargetRef.current!.srcObject = track.streams[0];
+							videoTargetRef.current!.load()
 						}
 
 						setDialing(dialing);
@@ -171,12 +169,18 @@ function WebRtcDemo(props: { ws: string }) {
 						dialing.onAccept = (c: Dialog) => {
 							handleDialog(c);
 						}
+						if (dialing.peer.localStream !== null) {
+							videoRef.current!.srcObject = dialing.peer.localStream;
+							videoRef.current!.play();
+						}
 					}).catch((err) => {
 						alert(err);
 					});
 				break;
 			case "calling":
 				dialing?.cancel().then(() => {
+					videoRef.current!.pause();
+					videoRef.current!.srcObject = null;
 					setDialing(null);
 					setRtcState("idle");
 				});

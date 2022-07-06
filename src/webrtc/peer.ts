@@ -9,11 +9,12 @@ export class Peer {
     remoteStream: ReadonlyArray<MediaStream> | null = null;
     localStream: MediaStream | null = null;
     private signaling: Signaling;
+    private dialer: boolean = false;
     peerId: string
 
     peerInfo: PeerInfo | null = null;
 
-    onTrack: (track: RTCTrackEvent) => void = () => { };
+    onTrack: (track: RTCTrackEvent) => void = () => { console.log("default track listener") };
 
     private constructor(peerId: string, config: RTCConfiguration, signaling: Signaling) {
         this.signaling = signaling;
@@ -21,33 +22,34 @@ export class Peer {
         this.connection = new RTCPeerConnection(config);
     }
 
-    public static create(peerInfo: PeerInfo, config: RTCConfiguration, signaling: Signaling): Peer {
+    public static create(peerInfo: PeerInfo, dialer: boolean, config: RTCConfiguration, signaling: Signaling): Peer {
         const peer = new Peer(peerInfo.id, config, signaling);
+        peer.dialer = dialer;
         peer.init();
+        mLog("peer", 'create peer: ' + peerInfo.id);
         return peer;
     }
 
-    public init() {
-        this.connection.onnegotiationneeded = () => {
+    private init() {
+        this.connection.onnegotiationneeded = (ev: Event) => {
             mLog("peer", 'on negotiation needed');
+            if (this.dialer) {
+                this.sendOffer();
+            }
         };
-        this.connection.onsignalingstatechange = () => {
+        this.connection.onsignalingstatechange = (ev: Event) => {
             mLog("peer", 'on signaling state change: ' + this.connection!.signalingState);
-        }
-        this.connection.onconnectionstatechange = () => {
+        };
+        this.connection.onconnectionstatechange = (ev: Event) => {
             mLog("peer", 'on connection state change: ' + this.connection!.connectionState);
         };
-
-        this.signaling.addMessageListener((message: SignalingMessage) => {
-            if (message.type === SignalingType.Candidate) {
-                if (message.content.id !== this.peerId) {
-                    return;
-                }
-                const candidate = message.content.candidate
-                this.connection.addIceCandidate(candidate);
-            }
-        })
-
+        this.connection.onicegatheringstatechange = (ev: Event) => {
+            mLog("peer", 'on ice gathering state change: ' + this.connection!.iceGatheringState);
+        }
+        this.connection.onicecandidateerror = (ev: Event) => {
+            console.log("on ice candidate error", ev);
+            mLog("peer", 'on ice candidate error:' + JSON.stringify(ev));
+        }
         this.connection.onicecandidate = (event: RTCPeerConnectionIceEvent) => {
             mLog("peer", 'onicecandidate: ' + event.type);
             this.signaling.sendSignaling(this.peerId, SignalingType.Candidate, {
@@ -56,19 +58,38 @@ export class Peer {
             });
         };
         this.connection.ontrack = (event: RTCTrackEvent) => {
-            mLog("peer", ' ontrack:' + event.track);
+            mLog("peer", ' ontrack:' + JSON.stringify(event));
+            console.log("peer track settings:", event.track.getSettings());
+            console.log("peer track constraints:", event.track.getConstraints());
+            console.log("peer track label:", event.track.label);
+            console.log("peer track kind:", event.track.kind);
+            console.log("peer track id:", event.track.id);
+            console.log("peer track ready state:", event.track.readyState);
+            console.log("peer streams: ", event.streams.length);
             this.remoteStream = event.streams;
             this.onTrack(event);
+
             event.track.onunmute = () => {
-                console.log('remote track unmuted');
-            }
-            event.track.onmute = () => {
-                console.log('remote track muted');
-            }
-            event.track.onended = () => {
-                console.log('remote track ended');
+                mLog("peer", 'onunmute: ' + JSON.stringify(event));
             }
         };
+
+        this.signaling.addMessageListener((message: SignalingMessage) => {
+            if (message.type === SignalingType.Candidate) {
+                if (message.content.id !== this.peerId) {
+                    return;
+                }
+                const candidate = message.content.candidate
+                this.connection.addIceCandidate(candidate)
+                    .then(() => {
+                        mLog("peer", 'addIceCandidate success');
+                    })
+                    .catch(error => {
+                        console.log('addIceCandidate error:', error);
+                        mLog("peer", 'Error adding ice candidate:' + error);
+                    })
+            }
+        })
     }
 
     public async attachLocalStream(m: boolean): Promise<MediaStream> {
@@ -77,6 +98,7 @@ export class Peer {
             // this.addStream(this.localStream);
             return Promise.resolve(this.localStream);
         } else {
+            // const stream_1 = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             const stream_1 = await navigator.mediaDevices.getUserMedia({ video: m, audio: !m });
             this.localStream = stream_1;
             this.addStream(stream_1);
@@ -113,38 +135,34 @@ export class Peer {
     }
 
     public onAnswer(answer: RTCSessionDescriptionInit) {
-        this.connection!.setRemoteDescription(answer).catch(error => {
-            mLog("peer", 'Error setting remote description:' + error);
-        });
+        this.connection!.setRemoteDescription(answer)
+            .then(() => {
+                mLog("peer", 'onAnswer setRemoteDescription success');
+            }).catch(error => {
+                mLog("peer", 'Error setting remote description:' + error);
+            });
     }
 
     public sendAnswer(remote: RTCSessionDescriptionInit) {
         this.connection!.setRemoteDescription(remote);
+        this.attachLocalStream(false).then();
         this.connection!.createAnswer().then(answer => {
             this.connection!.setLocalDescription(answer);
-            this.signaling.sendAnswer(this.peerId, answer);
+            this.signaling.sendAnswer(this.peerId, answer).then();
+        }).catch(error => {
+            mLog("peer", 'Error creating answer:' + error);
         });
     }
 
     public sendOffer() {
-        this.connection.createOffer();
         this.connection.createOffer().then(offer => {
             this.connection.setLocalDescription(offer);
-            this.signaling.sendOffer(this.peerId, offer);
+            this.signaling.sendOffer(this.peerId, offer).then();
+        }).then(() => {
+            mLog("peer", 'send offer success');
+        }).catch(error => {
+            mLog("peer", 'Error creating offer:' + JSON.stringify(error));
         });
-    }
-
-    public async createAnswer(offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit> {
-        this.connection.setRemoteDescription(offer);
-        const answer = await this.connection.createAnswer();
-        this.connection.setLocalDescription(answer);
-        return answer;
-    }
-
-    public async createOffer(): Promise<RTCSessionDescriptionInit> {
-        const offer = await this.connection.createOffer();
-        this.connection.setLocalDescription(offer);
-        return offer;
     }
 
     public addStream(stream: MediaStream) {
