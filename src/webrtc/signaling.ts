@@ -49,6 +49,8 @@ export interface Signaling {
     onIncomming: (peerInfo: PeerInfo, incoming: Incomming) => void;
     onOffer: (peerId: string, offer: RTCSessionDescriptionInit) => void;
     onAnswer: (peerId: string, answer: RTCSessionDescriptionInit) => void;
+    sendSignaling(to: string, type: SignalingType, content: any): Promise<void>
+    addMessageListener(l: (m: SignalingMessage) => void): () => void
 }
 
 export class WsSignaling implements Signaling {
@@ -158,6 +160,8 @@ export class WsSignaling implements Signaling {
     }
 
     public async sendMessage(to: string, data: SignalingMessage): Promise<void> {
+
+        mLog("signaling", "send, type:" + data.type + ", to:" + to);
         await this.send({
             action: "message.cli",
             data: data,
@@ -173,7 +177,6 @@ export class WsSignaling implements Signaling {
             if (this.ws.readyState !== WebSocket.OPEN) {
                 reject(new Error("WebSocket is not open"))
             } else {
-                mLog("signaling", 'send: ' + message.action);
                 this.ws.send(JSON.stringify(message));
                 resolve(message);
             }
@@ -238,7 +241,7 @@ export class WsSignaling implements Signaling {
 
     private onError(errorEvent: Event) {
         this.myId = null;
-        mLog("signaling", 'error, ' + errorEvent);
+        mLog("signaling", 'error, ' + JSON.stringify(errorEvent));
     }
 
     private onClose(closeEvent: CloseEvent) {

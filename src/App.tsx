@@ -3,17 +3,54 @@ import './App.css';
 import { Dialing, Dialog, Incomming } from './webrtc/dialing';
 import { setLogCb } from './webrtc/log';
 import { WsSignaling } from './webrtc/signaling';
-import { WebRTC } from './webrtc/webrtc';
+import { rtcConfig, setRtcConfig, WebRTC } from './webrtc/webrtc';
 
+interface AppConfig {
+	signalingUrl: string;
+	rtcConfig: RTCConfiguration;
+}
+
+const defaultConfig: AppConfig = {
+	signalingUrl: 'ws://localhost:8080/ws',
+	rtcConfig: rtcConfig
+}
 
 function App() {
 
+	const [config, setConfig] = React.useState<AppConfig>(defaultConfig);
+
+	const applyConfig = (newConfig: AppConfig) => {
+		setConfig(newConfig);
+		setRtcConfig(newConfig.rtcConfig);
+	}
+
 	return <div className="App">
 		<header className="App-header">
-			<WebRtcDemo ws='wss://ws.glide-im.pro/ws' />
-			<Logger />
+			{config == defaultConfig
+				? <Configure callback={applyConfig} />
+				: <>
+					<WebRtcDemo ws={config.signalingUrl} />
+					<Logger /></>
+			}
 		</header>
 	</div>;
+}
+
+function Configure(props: { callback: (config: AppConfig) => void }) {
+
+	const textRef = useRef<HTMLTextAreaElement | null>(null);
+
+
+	const onApply = () => {
+		const config = JSON.parse(textRef.current!.value);
+		props.callback(config);
+	}
+
+	return <>
+		<p>请输入配置信息</p>
+		<textarea ref={textRef} defaultValue={JSON.stringify(defaultConfig)} style={{ width: "400px", height: "300px" }} />
+		<button onClick={onApply}>应用</button>
+	</>
 }
 
 function Logger() {
@@ -102,14 +139,12 @@ function WebRtcDemo(props: { ws: string }) {
 			}
 		})
 		dialog.onHangup = () => {
-			videoRef.current?.pause()
 			videoRef.current!.srcObject = null;
+			videoRef.current?.pause()
+			videoTargetRef.current!.srcObject = null;
+			videoTargetRef.current?.pause()
 			setRtcState("idle");
 		}
-		dialog.openMedia().then((stream) => {
-			videoRef.current!.srcObject = stream;
-			videoRef.current!.play();
-		})
 		setCall(dialog);
 		setRtcState("connected");
 	}
@@ -119,6 +154,12 @@ function WebRtcDemo(props: { ws: string }) {
 			case "idle":
 				webRTC.call(friendIdRef.current!.value)
 					.then((dialing) => {
+
+						if (dialing.peer.localStream !== null) {
+							videoRef.current!.srcObject = dialing.peer.localStream;
+							videoRef.current!.play();
+						}
+
 						setDialing(dialing);
 						setRtcState("calling");
 						dialing.onFail = (msg) => {
@@ -142,6 +183,8 @@ function WebRtcDemo(props: { ws: string }) {
 				break;
 			case "incoming":
 				incomming?.accept().then((call) => {
+					videoRef.current!.srcObject = call.peer.localStream;
+					videoRef.current!.play();
 					handleDialog(call);
 				}).catch(e => {
 					setRtcState("idle");

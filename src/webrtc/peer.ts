@@ -1,12 +1,13 @@
+import { json } from "stream/consumers";
 import { PeerInfo } from "./dialing";
 import { mLog } from "./log";
-import { Signaling, WsSignaling } from "./signaling";
+import { Signaling, SignalingMessage, SignalingType, WsSignaling } from "./signaling";
 
 export class Peer {
 
     connection: RTCPeerConnection;
-    private remoteStream: ReadonlyArray<MediaStream> | null = null;
-    private localStream: MediaStream | null = null;
+    remoteStream: ReadonlyArray<MediaStream> | null = null;
+    localStream: MediaStream | null = null;
     private signaling: Signaling;
     peerId: string
 
@@ -36,13 +37,26 @@ export class Peer {
         this.connection.onconnectionstatechange = () => {
             mLog("peer", 'on connection state change: ' + this.connection!.connectionState);
         };
+
+        this.signaling.addMessageListener((message: SignalingMessage) => {
+            if (message.type === SignalingType.Candidate) {
+                if (message.content.id !== this.peerId) {
+                    return;
+                }
+                const candidate = message.content.candidate
+                this.connection.addIceCandidate(candidate);
+            }
+        })
+
         this.connection.onicecandidate = (event: RTCPeerConnectionIceEvent) => {
-            mLog("peer", 'on ice candidate: ' + event.type);
-            // this.connection.addIceCandidate(event.candidate).catch(error => {
-            // console.log('Error adding candidate: ' + error);
-            // });
+            mLog("peer", 'onicecandidate: ' + event.type);
+            this.signaling.sendSignaling(this.peerId, SignalingType.Candidate, {
+                id: this.peerId,
+                candidate: event.candidate
+            });
         };
         this.connection.ontrack = (event: RTCTrackEvent) => {
+            mLog("peer", ' ontrack:' + event.track);
             this.remoteStream = event.streams;
             this.onTrack(event);
             event.track.onunmute = () => {
@@ -54,17 +68,16 @@ export class Peer {
             event.track.onended = () => {
                 console.log('remote track ended');
             }
-            mLog("peer", ' ontrack' + event.track);
         };
     }
 
-    public async attachLocalStream(): Promise<MediaStream> {
+    public async attachLocalStream(m: boolean): Promise<MediaStream> {
         mLog("peer", 'add local stream');
-        if (this.localStream != null && this.localStream.active) {
-            this.addStream(this.localStream);
+        if (this.localStream !== null && this.localStream.active) {
+            // this.addStream(this.localStream);
             return Promise.resolve(this.localStream);
         } else {
-            const stream_1 = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            const stream_1 = await navigator.mediaDevices.getUserMedia({ video: m, audio: !m });
             this.localStream = stream_1;
             this.addStream(stream_1);
             return stream_1;

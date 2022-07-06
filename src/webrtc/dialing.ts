@@ -64,7 +64,7 @@ export class WsDialog implements Dialog {
     }
 
     async openMedia(): Promise<MediaStream> {
-        const stream = await this.peer.attachLocalStream();
+        const stream = await this.peer.attachLocalStream(false);
         return stream;
     }
 
@@ -126,12 +126,14 @@ export class WsDialing implements Dialing {
         return this.signaling.sendSignaling(this.peerId, SignalingType.Cancel, this.myInfo)
     }
 
-    dial(): Promise<Dialing> {
+    async dial(): Promise<Dialing> {
 
         if (!this.signaling.avaliable()) {
             return Promise.reject("Signaling not avaliable");
         }
         mLog("WsDialing", "dial:" + this.peerId);
+
+        await this.peer.attachLocalStream(true)
 
         return this.peer.createOffer()
             .catch(e => {
@@ -163,7 +165,7 @@ export class WsDialing implements Dialing {
     }
 
     private receiveAccept(m: SignalingMessage) {
-        mLog("WsDialing", "receiveAccept:" + m.content);
+        mLog("WsDialing", "receive accept:" + m.content);
         const peerInfo = JSON.parse(m.content) as PeerInfo
         if (peerInfo.id === this.peerId) {
             this.accepted = true;
@@ -175,7 +177,7 @@ export class WsDialing implements Dialing {
     }
 
     private receiveReject(m: SignalingMessage) {
-        mLog("WsDialing", "receiveReject:" + m.content);
+        mLog("WsDialing", "receive reject:" + m.content);
         const peerInfo = JSON.parse(m.content) as PeerInfo
         if (peerInfo.id === this.peerId) {
             this.callTimer && clearInterval(this.callTimer!!);
@@ -258,6 +260,8 @@ export class WsIncomming implements Incomming {
     }
 
     async accept(): Promise<Dialog> {
+        await this.peer.attachLocalStream(false)
+
         const answer = await this.peer.createAnswer(this.peerInfo.sdp);
         const myInfo: PeerInfo = {
             id: this.signaling.myId!!,

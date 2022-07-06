@@ -9,11 +9,6 @@ export let iceServer: RTCIceServer[] = [
         credential: 'openrelayproject'
     },
     {
-        urls: 'turn:openrelay.metered.ca:443',
-        username: 'openrelayproject',
-        credential: 'openrelayproject'
-    },
-    {
         urls: "turn:openrelay.metered.ca:443?transport=tcp",
         username: "openrelayproject",
         credential: "openrelayproject",
@@ -23,12 +18,16 @@ export let iceServer: RTCIceServer[] = [
     },
 ]
 
-export const rtcConfig: RTCConfiguration = {
+export let rtcConfig: RTCConfiguration = {
     iceServers: iceServer,
     iceCandidatePoolSize: 10,
     bundlePolicy: 'max-compat',
     rtcpMuxPolicy: 'require',
 };
+
+export function setRtcConfig(c: RTCConfiguration) {
+    rtcConfig = c;
+}
 
 export async function testWebRTC(s: (stream: MediaStream) => void): Promise<MediaStream> {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
