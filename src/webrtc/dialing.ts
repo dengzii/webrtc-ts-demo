@@ -51,7 +51,7 @@ export class WsDialog implements Dialog {
         this.signaling = signaling;
         this.removeMessageListener = this.signaling.addMessageListener((m: SignalingMessage) => {
             if (m.type === SignalingType.Hangup) {
-                const peerInfo = JSON.parse(m.content) as PeerInfo
+                const peerInfo = m.content as PeerInfo
                 if (peerInfo.id === this.peer.peerId) {
                     this.removeMessageListener()
                     this.onHangup();
@@ -95,10 +95,7 @@ export class WsDialog implements Dialog {
             id: this.signaling.myId!!
         }
 
-        return this.signaling.sendMessage(this.peer.peerId, {
-            type: SignalingType.Hangup,
-            content: JSON.stringify(p),
-        });
+        return this.signaling.sendSignaling(this.peer.peerId, SignalingType.Hangup, p);
     }
 }
 
@@ -161,7 +158,7 @@ export class WsDialing implements Dialing {
 
     private receiveAccept(m: SignalingMessage) {
         mLog("WsDialing", "receive accept");
-        const peerInfo = JSON.parse(m.content) as PeerInfo
+        const peerInfo = m.content as PeerInfo
         if (peerInfo.id === this.peerId) {
             this.accepted = true;
             this.callTimer && clearInterval(this.callTimer!!);
@@ -173,7 +170,7 @@ export class WsDialing implements Dialing {
 
     private receiveReject(m: SignalingMessage) {
         mLog("WsDialing", "receive reject");
-        const peerInfo = JSON.parse(m.content) as PeerInfo
+        const peerInfo = m.content as PeerInfo
         if (peerInfo.id === this.peerId) {
             this.callTimer && clearInterval(this.callTimer!!);
             this.removeMessageListener()
@@ -195,15 +192,13 @@ export class WsDialing implements Dialing {
             return;
         }
 
-        this.signaling.sendMessage(this.peerId, {
-            type: SignalingType.Dialing,
-            content: JSON.stringify(this.myInfo)
-        }).then(() => {
+        this.signaling.sendSignaling(this.peerId, SignalingType.Dialing, this.myInfo)
+            .then(() => {
 
-        }).catch(e => {
-            this.cancel();
-            this.failCallback(e.message)
-        });
+            }).catch(e => {
+                this.cancel();
+                this.failCallback(e.message)
+            });
 
     }
 }
@@ -228,12 +223,12 @@ export class WsIncomming implements Incomming {
 
         this.removeMessageListener = signaling.addMessageListener((m: SignalingMessage) => {
             if (m.type === SignalingType.Dialing) {
-                const peerInfo = JSON.parse(m.content) as PeerInfo
+                const peerInfo = m.content as PeerInfo
                 if (peerInfo.id === this.peerInfo.id) {
                     this.checkActive()
                 }
             } else if (m.type === SignalingType.Cancel) {
-                const peerInfo = JSON.parse(m.content) as PeerInfo
+                const peerInfo = m.content as PeerInfo
                 if (peerInfo.id === this.peerInfo.id) {
                     this.removeMessageListener()
                     this.timeout && clearInterval(this.timeout!!);

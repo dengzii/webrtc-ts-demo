@@ -15,6 +15,25 @@ const defaultConfig: AppConfig = {
 	rtcConfig: rtcConfig
 }
 
+const myConfig: AppConfig = {
+	signalingUrl: 'wss://ws.glide-im.pro/ws',
+	rtcConfig: {
+		iceServers: [
+			{
+				urls: 'turn:dengzii.com:8100',
+				username: 'test2',
+				credential: 'test2'
+			},
+			{
+				urls: 'stun:dengzii.com:8100',
+			},
+		],
+		iceCandidatePoolSize: 10,
+		iceTransportPolicy: 'relay',
+		bundlePolicy: 'max-bundle',
+		rtcpMuxPolicy: 'require',
+	}
+}
 
 function App() {
 
@@ -27,7 +46,7 @@ function App() {
 
 	return <div className="App">
 		<header className="App-header">
-			{config === null
+			{config === defaultConfig
 				? <Configure default={config} callback={applyConfig} />
 				: <>
 					<WebRtcDemo ws={config.signalingUrl} />

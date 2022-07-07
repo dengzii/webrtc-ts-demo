@@ -47,8 +47,6 @@ export interface Signaling {
     sendOffer(peerId: string, offer: RTCSessionDescriptionInit): Promise<void>;
     sendAnswer(peerId: string, answer: RTCSessionDescriptionInit): Promise<void>;
     onIncomming: (peerInfo: PeerInfo, incoming: Incomming) => void;
-    onOffer: (peerId: string, offer: RTCSessionDescriptionInit) => void;
-    onAnswer: (peerId: string, answer: RTCSessionDescriptionInit) => void;
     sendSignaling(to: string, type: SignalingType, content: any): Promise<void>
     addMessageListener(l: (m: SignalingMessage) => void): () => void
 }
@@ -68,8 +66,6 @@ export class WsSignaling implements Signaling {
     myId: string | null = null;
 
     onIncomming: (peerInfo: PeerInfo, incoming: Incomming) => void = () => { }
-    onOffer: (peerId: string, offer: RTCSessionDescriptionInit) => void = () => { };
-    onAnswer: (peerId: string, answer: RTCSessionDescriptionInit) => void = () => { };
     onHelloCallback: (id: string, replay: boolean) => void = () => { }
     logCallback: (message: string) => void = () => { };
 
@@ -88,27 +84,19 @@ export class WsSignaling implements Signaling {
     }
 
     sendOffer(peerId: string, dsp: RTCSessionDescriptionInit): Promise<void> {
-        mLog("signaling", 'send offer: ' + peerId);
         const cnt: DspMessage = {
             peerId: peerId,
             sdp: dsp,
         }
-        return this.sendMessage(peerId, {
-            type: SignalingType.Offer,
-            content: cnt,
-        });
+        return this.sendSignaling(peerId, SignalingType.Offer, cnt);
     }
 
     sendAnswer(peerId: string, answer: RTCSessionDescriptionInit): Promise<void> {
-        mLog("signaling", 'send answer: ' + peerId);
         const cnt: DspMessage = {
             peerId: peerId,
             sdp: answer,
         }
-        return this.sendMessage(peerId, {
-            type: SignalingType.Answer,
-            content: cnt,
-        });
+        return this.sendSignaling(peerId, SignalingType.Answer, cnt);
     }
 
     addMessageListener(l: (m: SignalingMessage) => void): () => void {
@@ -131,7 +119,7 @@ export class WsSignaling implements Signaling {
                 from: "",
                 to: ""
             });
-        }, 20000);
+        }, 15000);
     }
 
     public setIdCallback(callback: (id: string) => void) {
@@ -146,25 +134,30 @@ export class WsSignaling implements Signaling {
     }
 
     public helloToFriend(id: string, replay: boolean = false) {
-        this.sendMessage(id, {
-            type: replay ? SignalingType.Hello : SignalingType.Hi,
-            content: this.myId!!
-        }).then()
+        this.sendSignaling(id, replay ? SignalingType.Hello : SignalingType.Hi, this.myId!!).then();
     }
 
-    public sendSignaling(to: string, type: SignalingType, content: any): Promise<void> {
-        return this.sendMessage(to, {
-            type: type,
-            content: JSON.stringify(content)
-        })
+    public async sendSignaling(to: string, type: SignalingType, content: any): Promise<void> {
+
+        return this.send({
+            action: "message.cli",
+            data: {
+                type: type,
+                content: content
+            },
+            seq: this.seq++,
+            from: this.myId,
+            to: to,
+        }).then();
     }
 
-    public async sendMessage(to: string, data: SignalingMessage): Promise<void> {
-
-        mLog("signaling", "send, type:" + data.type + ", to:" + to);
+    private async sendCliMessage(to: string, type: string, data: any) {
         await this.send({
             action: "message.cli",
-            data: data,
+            data: {
+                type: type,
+                content: data
+            },
             seq: this.seq++,
             from: this.myId,
             to: to,
@@ -189,10 +182,6 @@ export class WsSignaling implements Signaling {
         }
     }
 
-    public onMessageReceived(callback: (message: any) => void) {
-        this.onMessageCallback = callback;
-    }
-
     private onMessage(messageEvent: MessageEvent) {
         const message: Message = JSON.parse(messageEvent.data as string);
 
@@ -209,28 +198,22 @@ export class WsSignaling implements Signaling {
         }
     }
 
-    private onSignalingMessage(m: SignalingMessage) {
-        mLog("signaling", 'on signaling: ' + m.type);
-        this.messageListeners.forEach(l => l(m));
+    private onSignalingMessage(msg: SignalingMessage) {
+        mLog("signaling", 'receive: ' + msg.type);
 
-        switch (m.type) {
-            case SignalingType.Offer:
-                const offer: DspMessage = JSON.parse(m.content);
-                this.onOffer(offer.peerId, offer.sdp);
-                break
-            case SignalingType.Answer:
-                const answer: DspMessage = JSON.parse(m.content);
-                this.onAnswer(answer.peerId, answer.sdp);
-                break
+
+        this.messageListeners.forEach(l => l(msg));
+
+        switch (msg.type) {
             case SignalingType.Hi:
-                this.helloToFriend(m.content, true);
-                this.onHelloCallback(m.content, false)
+                this.helloToFriend(msg.content, true);
+                this.onHelloCallback(msg.content, false)
                 break;
             case SignalingType.Hello:
-                this.onHelloCallback(m.content, true)
+                this.onHelloCallback(msg.content, true)
                 break;
             case SignalingType.Dialing:
-                const peer = JSON.parse(m.content) as PeerInfo;
+                const peer = msg.content as PeerInfo;
                 if (!this.incommings.has(peer.id)) {
                     const incomming = new WsIncomming(peer, this);
                     this.incommings.set(peer.id, incomming);

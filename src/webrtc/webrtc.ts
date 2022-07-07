@@ -84,7 +84,6 @@ function connectionPeer(stream: MediaStream, s: (stream: MediaStream) => void) {
 
 export class WebRTC {
 
-    private peer: Peer | null = null;
     private signaling: Signaling
 
     onIncoming: ((peerId: string, incoming: Incomming) => void) = () => { }
@@ -99,18 +98,6 @@ export class WebRTC {
     private init() {
         this.signaling.onIncomming = (peerInfo: PeerInfo, incoming: Incomming) => {
             this.onIncoming(peerInfo.id, incoming);
-        }
-
-        this.signaling.onOffer = (offerPeerId: string, offer: RTCSessionDescriptionInit) => {
-            if (offerPeerId === this.peer?.peerId) {
-                this.peer?.sendAnswer(offer);
-            }
-        }
-
-        this.signaling.onAnswer = (answerPeerId: string, answer: RTCSessionDescriptionInit) => {
-            if (answerPeerId === this.peer?.peerId) {
-                this.peer?.onAnswer(answer);
-            }
         }
     }
 

@@ -1,7 +1,7 @@
 import { json } from "stream/consumers";
 import { PeerInfo } from "./dialing";
 import { mLog } from "./log";
-import { Signaling, SignalingMessage, SignalingType, WsSignaling } from "./signaling";
+import { DspMessage, Signaling, SignalingMessage, SignalingType, WsSignaling } from "./signaling";
 
 export class Peer {
 
@@ -32,7 +32,7 @@ export class Peer {
 
     private init() {
         this.connection.onnegotiationneeded = (ev: Event) => {
-            mLog("peer", 'on negotiation needed');
+            mLog("peer", 'on negotiation needed:' + JSON.stringify(ev));
             if (this.dialer) {
                 this.sendOffer();
             }
@@ -75,38 +75,55 @@ export class Peer {
         };
 
         this.signaling.addMessageListener((message: SignalingMessage) => {
-            if (message.type === SignalingType.Candidate) {
-                if (message.content.id !== this.peerId) {
-                    return;
-                }
-                const candidate = message.content.candidate
-                this.connection.addIceCandidate(candidate)
-                    .then(() => {
-                        mLog("peer", 'addIceCandidate success');
-                    })
-                    .catch(error => {
-                        console.log('addIceCandidate error:', error);
-                        mLog("peer", 'Error adding ice candidate:' + error);
-                    })
+            switch (message.type) {
+                case SignalingType.Offer:
+                    const offer: DspMessage = message.content;
+                    if (offer.peerId !== this.peerId) {
+                        return
+                    }
+                    this.sendAnswer(offer.sdp);
+                    break
+                case SignalingType.Answer:
+                    const answer: DspMessage = message.content;
+                    if (answer.peerId !== this.peerId) {
+                        return
+                    }
+                    this.onAnswer(answer.sdp);
+                    break
+                case SignalingType.Candidate:
+                    if (message.content.id !== this.peerId) {
+                        return;
+                    }
+                    const candidate = message.content.candidate
+                    this.connection.addIceCandidate(candidate)
+                        .then(() => {
+                            mLog("peer", 'addIceCandidate success');
+                        })
+                        .catch(error => {
+                            mLog("peer", 'Error adding ice candidate:' + error);
+                        })
+                    break
             }
         })
     }
 
     public async attachLocalStream(m: boolean): Promise<MediaStream> {
-        mLog("peer", 'add local stream');
         if (this.localStream !== null && this.localStream.active) {
             // this.addStream(this.localStream);
+            mLog("peer", 'local stream already active');
             return Promise.resolve(this.localStream);
         } else {
             // const stream_1 = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             const stream_1 = await navigator.mediaDevices.getUserMedia({ video: m, audio: !m });
             this.localStream = stream_1;
             this.addStream(stream_1);
+            mLog("peer", 'add local stream');
             return stream_1;
         }
     }
 
     public close() {
+        mLog("peer", 'close');
         (this.signaling as WsSignaling).deleteIncomming(this.peerId);
 
         if (this.remoteStream !== null) {
@@ -144,25 +161,33 @@ export class Peer {
     }
 
     public sendAnswer(remote: RTCSessionDescriptionInit) {
+        mLog("peer", 'sendAnswer');
         this.connection!.setRemoteDescription(remote);
         this.attachLocalStream(false).then();
-        this.connection!.createAnswer().then(answer => {
-            this.connection!.setLocalDescription(answer);
-            this.signaling.sendAnswer(this.peerId, answer).then();
-        }).catch(error => {
-            mLog("peer", 'Error creating answer:' + error);
-        });
+        this.connection!.createAnswer()
+            .then(answer => {
+                this.connection!.setLocalDescription(answer);
+                this.signaling.sendAnswer(this.peerId, answer)
+                    .then(() => {
+                        mLog("peer", 'sendAnswer success');
+                    });
+            }).catch(error => {
+                mLog("peer", 'Error creating answer:' + error);
+            });
     }
 
     public sendOffer() {
-        this.connection.createOffer().then(offer => {
-            this.connection.setLocalDescription(offer);
-            this.signaling.sendOffer(this.peerId, offer).then();
-        }).then(() => {
-            mLog("peer", 'send offer success');
-        }).catch(error => {
-            mLog("peer", 'Error creating offer:' + JSON.stringify(error));
-        });
+        mLog("peer", 'sendOffer');
+        this.connection.createOffer()
+            .then(offer => {
+                this.connection.setLocalDescription(offer);
+                this.signaling.sendOffer(this.peerId, offer)
+                    .then(() => {
+                        mLog("peer", 'sendOffer success');
+                    });
+            }).catch(error => {
+                mLog("peer", 'Error creating offer:' + JSON.stringify(error));
+            });
     }
 
     public addStream(stream: MediaStream) {
