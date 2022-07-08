@@ -21,12 +21,13 @@ const myConfig: AppConfig = {
 		iceServers: [
 			{
 				urls: 'turn:dengzii.com:8100',
-				username: 'test2',
-				credential: 'test2'
+				username: 'test1',
+				credentialType: 'password',
+				credential: 'test1'
 			},
-			{
-				urls: 'stun:dengzii.com:8100',
-			},
+			// {
+			// 	urls: 'stun:dengzii.com:8100',
+			// },
 		],
 		iceCandidatePoolSize: 10,
 		iceTransportPolicy: 'relay',
@@ -37,7 +38,7 @@ const myConfig: AppConfig = {
 
 function App() {
 
-	const [config, setConfig] = React.useState<AppConfig>(defaultConfig);
+	const [config, setConfig] = React.useState<AppConfig>(myConfig);
 
 	const applyConfig = (newConfig: AppConfig) => {
 		setConfig(newConfig);
@@ -46,7 +47,7 @@ function App() {
 
 	return <div className="App">
 		<header className="App-header">
-			{config === defaultConfig
+			{config === myConfig
 				? <Configure default={config} callback={applyConfig} />
 				: <>
 					<WebRtcDemo ws={config.signalingUrl} />
@@ -106,10 +107,21 @@ function WebRtcDemo(props: { ws: string }) {
 	const webRTC = React.useMemo(() => new WebRTC(signaling), [signaling]);
 
 	useEffect(() => {
+		videoRef.current!.onloadedmetadata = () => {
+			videoRef.current!.play();
+		}
+	}, [videoRef])
+
+	useEffect(() => {
+		videoTargetRef.current!.onloadedmetadata = () => {
+			videoTargetRef.current!.play();
+		}
+	}, [videoTargetRef])
+
+	useEffect(() => {
 		webRTC.onIncoming = (peerId: string, i: Incomming) => {
-			i.peer.onTrack = (track: RTCTrackEvent) => {
+			i.peer.onRemoteTrack = (track: RTCTrackEvent) => {
 				videoTargetRef.current!.srcObject = track.streams[0];
-				videoTargetRef.current!.play()
 			}
 
 			i.onCancel = () => {
@@ -118,16 +130,6 @@ function WebRtcDemo(props: { ws: string }) {
 			}
 			setIncomming(i);
 			setRtcState("incoming");
-		}
-		webRTC.onLocalStreamChanged = (stream: MediaStream | null) => {
-			if (videoRef.current) {
-				videoRef.current.srcObject = stream;
-				if (stream !== null) {
-					videoRef.current.play();
-				} else {
-					videoRef.current.pause();
-				}
-			}
 		}
 	}, [webRTC])
 
@@ -172,9 +174,11 @@ function WebRtcDemo(props: { ws: string }) {
 				webRTC.call(friendIdRef.current!.value)
 					.then((dialing) => {
 
-						dialing.peer.onTrack = (track: RTCTrackEvent) => {
+						dialing.peer.onLocalMediaReady = (stream: MediaStream) => {
+							videoRef.current!.srcObject = stream;
+						}
+						dialing.peer.onRemoteTrack = (track: RTCTrackEvent) => {
 							videoTargetRef.current!.srcObject = track.streams[0];
-							videoTargetRef.current!.load()
 						}
 
 						setDialing(dialing);
@@ -187,10 +191,6 @@ function WebRtcDemo(props: { ws: string }) {
 						}
 						dialing.onAccept = (c: Dialog) => {
 							handleDialog(c);
-						}
-						if (dialing.peer.localStream !== null) {
-							videoRef.current!.srcObject = dialing.peer.localStream;
-							videoRef.current!.play();
 						}
 					}).catch((err) => {
 						alert(err);
@@ -206,8 +206,6 @@ function WebRtcDemo(props: { ws: string }) {
 				break;
 			case "incoming":
 				incomming?.accept().then((call) => {
-					videoRef.current!.srcObject = call.peer.localStream;
-					videoRef.current!.play();
 					handleDialog(call);
 				}).catch(e => {
 					setRtcState("idle");

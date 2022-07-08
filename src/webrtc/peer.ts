@@ -14,7 +14,10 @@ export class Peer {
 
     peerInfo: PeerInfo | null = null;
 
-    onTrack: (track: RTCTrackEvent) => void = () => { console.log("default track listener") };
+    private remoteStreamId: string | null = null;
+
+    onRemoteTrack: (track: RTCTrackEvent) => void = () => { };
+    onLocalMediaReady: (m: MediaStream) => void = () => { }
 
     private constructor(peerId: string, config: RTCConfiguration, signaling: Signaling) {
         this.signaling = signaling;
@@ -60,41 +63,44 @@ export class Peer {
         this.connection.ontrack = (event: RTCTrackEvent) => {
             mLog("peer", ' ontrack:' + JSON.stringify(event));
             console.log("peer track settings:", event.track.getSettings());
-            console.log("peer track constraints:", event.track.getConstraints());
-            console.log("peer track label:", event.track.label);
+            //console.log("peer track constraints:", event.track.getConstraints());
+            //console.log("peer track label:", event.track.label);
             console.log("peer track kind:", event.track.kind);
             console.log("peer track id:", event.track.id);
-            console.log("peer track ready state:", event.track.readyState);
-            console.log("peer streams: ", event.streams.length);
+            //console.log("peer track ready state:", event.track.readyState);
+            //console.log("peer streams: ", event.streams.length);
             this.remoteStream = event.streams;
-            this.onTrack(event);
+
+            this.onRemoteTrack(event);
 
             event.track.onunmute = () => {
                 mLog("peer", 'onunmute: ' + JSON.stringify(event));
             }
         };
 
-        this.signaling.addMessageListener((message: SignalingMessage) => {
-            switch (message.type) {
+        this.signaling.addMessageListener((msg: SignalingMessage) => {
+            switch (msg.type) {
                 case SignalingType.Offer:
-                    const offer: DspMessage = message.content;
+                    const offer: DspMessage = msg.content;
+                    mLog("peer", 'on offer: ' + offer.peerId);
                     if (offer.peerId !== this.peerId) {
                         return
                     }
                     this.sendAnswer(offer.sdp);
                     break
                 case SignalingType.Answer:
-                    const answer: DspMessage = message.content;
+                    const answer: DspMessage = msg.content;
+                    mLog("peer", 'on answer: ' + answer.peerId);
                     if (answer.peerId !== this.peerId) {
                         return
                     }
                     this.onAnswer(answer.sdp);
                     break
                 case SignalingType.Candidate:
-                    if (message.content.id !== this.peerId) {
+                    if (msg.content.id !== this.peerId) {
                         return;
                     }
-                    const candidate = message.content.candidate
+                    const candidate = msg.content.candidate
                     this.connection.addIceCandidate(candidate)
                         .then(() => {
                             mLog("peer", 'addIceCandidate success');
@@ -107,15 +113,16 @@ export class Peer {
         })
     }
 
-    public async attachLocalStream(m: boolean): Promise<MediaStream> {
+    public async attachLocalStream(): Promise<MediaStream> {
         if (this.localStream !== null && this.localStream.active) {
             // this.addStream(this.localStream);
             mLog("peer", 'local stream already active');
             return Promise.resolve(this.localStream);
         } else {
-            // const stream_1 = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            const stream_1 = await navigator.mediaDevices.getUserMedia({ video: m, audio: !m });
+            const stream_1 = await navigator.mediaDevices.getUserMedia({ video: this.dialer, audio: !this.dialer });
+            // const stream_1 = await navigator.mediaDevices.getUserMedia({ video: m, audio: !m });
             this.localStream = stream_1;
+            this.onLocalMediaReady(stream_1);
             this.addStream(stream_1);
             mLog("peer", 'add local stream');
             return stream_1;
@@ -163,14 +170,17 @@ export class Peer {
     public sendAnswer(remote: RTCSessionDescriptionInit) {
         mLog("peer", 'sendAnswer');
         this.connection!.setRemoteDescription(remote);
-        this.attachLocalStream(false).then();
+        this.attachLocalStream().then();
         this.connection!.createAnswer()
             .then(answer => {
                 this.connection!.setLocalDescription(answer);
-                this.signaling.sendAnswer(this.peerId, answer)
-                    .then(() => {
-                        mLog("peer", 'sendAnswer success');
-                    });
+                const cnt: DspMessage = {
+                    peerId: this.signaling.myId!!,
+                    sdp: answer,
+                }
+                return this.signaling.sendSignaling(this.peerId, SignalingType.Answer, cnt);
+            }).then(() => {
+                mLog("peer", 'sendAnswer success');
             }).catch(error => {
                 mLog("peer", 'Error creating answer:' + error);
             });
@@ -181,10 +191,13 @@ export class Peer {
         this.connection.createOffer()
             .then(offer => {
                 this.connection.setLocalDescription(offer);
-                this.signaling.sendOffer(this.peerId, offer)
-                    .then(() => {
-                        mLog("peer", 'sendOffer success');
-                    });
+                const cnt: DspMessage = {
+                    peerId: this.signaling.myId!!,
+                    sdp: offer,
+                }
+                return this.signaling.sendSignaling(this.peerId, SignalingType.Offer, cnt);
+            }).then(() => {
+                mLog("peer", 'sendOffer success');
             }).catch(error => {
                 mLog("peer", 'Error creating offer:' + JSON.stringify(error));
             });

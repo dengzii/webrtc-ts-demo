@@ -87,7 +87,6 @@ export class WebRTC {
     private signaling: Signaling
 
     onIncoming: ((peerId: string, incoming: Incomming) => void) = () => { }
-    onLocalStreamChanged: ((stream: MediaStream | null) => void) = () => { }
     onRemoteStreamChanged: ((stream: MediaStream | null) => void) = () => { }
 
     constructor(signling: Signaling) {

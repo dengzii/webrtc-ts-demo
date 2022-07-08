@@ -43,9 +43,8 @@ interface Hello {
 }
 
 export interface Signaling {
+    myId: string | null;
     avaliable(): boolean;
-    sendOffer(peerId: string, offer: RTCSessionDescriptionInit): Promise<void>;
-    sendAnswer(peerId: string, answer: RTCSessionDescriptionInit): Promise<void>;
     onIncomming: (peerInfo: PeerInfo, incoming: Incomming) => void;
     sendSignaling(to: string, type: SignalingType, content: any): Promise<void>
     addMessageListener(l: (m: SignalingMessage) => void): () => void
@@ -81,22 +80,6 @@ export class WsSignaling implements Signaling {
 
     avaliable(): boolean {
         return this.ws.readyState === WebSocket.OPEN && this.myId !== null;
-    }
-
-    sendOffer(peerId: string, dsp: RTCSessionDescriptionInit): Promise<void> {
-        const cnt: DspMessage = {
-            peerId: peerId,
-            sdp: dsp,
-        }
-        return this.sendSignaling(peerId, SignalingType.Offer, cnt);
-    }
-
-    sendAnswer(peerId: string, answer: RTCSessionDescriptionInit): Promise<void> {
-        const cnt: DspMessage = {
-            peerId: peerId,
-            sdp: answer,
-        }
-        return this.sendSignaling(peerId, SignalingType.Answer, cnt);
     }
 
     addMessageListener(l: (m: SignalingMessage) => void): () => void {
@@ -149,20 +132,6 @@ export class WsSignaling implements Signaling {
             from: this.myId,
             to: to,
         }).then();
-    }
-
-    private async sendCliMessage(to: string, type: string, data: any) {
-        await this.send({
-            action: "message.cli",
-            data: {
-                type: type,
-                content: data
-            },
-            seq: this.seq++,
-            from: this.myId,
-            to: to,
-        });
-        return await Promise.resolve();
     }
 
     private send(message: Message): Promise<Message> {

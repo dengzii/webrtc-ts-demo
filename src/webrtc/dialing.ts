@@ -64,7 +64,11 @@ export class WsDialog implements Dialog {
 
     private initConnection() {
         if (this.isDialer) {
-            this.peer.attachLocalStream(true).then();
+            this.peer.attachLocalStream()
+                .then()
+                .catch(e => {
+                    mLog("dialing", "init conn err:" + JSON.stringify(e))
+                });
         }
     }
 
@@ -73,7 +77,7 @@ export class WsDialog implements Dialog {
     }
 
     async openMedia(): Promise<MediaStream> {
-        const stream = await this.peer.attachLocalStream(false).then();
+        const stream = await this.peer.attachLocalStream().then();
         return stream;
     }
 
@@ -82,7 +86,7 @@ export class WsDialog implements Dialog {
     }
 
     onRemoteTrack(onTrack: (r: RTCTrackEvent) => void) {
-        this.peer.onTrack = (r) => {
+        this.peer.onRemoteTrack = (r) => {
             onTrack(r)
         }
     }
@@ -250,7 +254,7 @@ export class WsIncomming implements Incomming {
     }
 
     async accept(): Promise<Dialog> {
-        await this.peer.attachLocalStream(false).then()
+        await this.peer.attachLocalStream().then()
 
         const myInfo: PeerInfo = {
             id: this.signaling.myId!!,
