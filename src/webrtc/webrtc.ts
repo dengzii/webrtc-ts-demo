@@ -1,4 +1,4 @@
-import { Dialing, Incomming, PeerInfo, WsDialing } from "./dialing";
+import { Dialing, Incoming, PeerInfo, WsDialing } from "./dialing";
 import { Peer } from "./peer";
 import { Signaling, WsSignaling } from "./signaling";
 
@@ -70,12 +70,12 @@ function connectionPeer(stream: MediaStream, s: (stream: MediaStream) => void) {
         myPeerConnection.addTrack(track, stream);
     });
 
-    myPeerConnection.createOffer().then(function (offer) {
+    myPeerConnection.createOffer().then(async function (offer) {
         console.log('createOffer', offer.sdp);
-        myPeerConnection.setLocalDescription(offer);
-        thierPeerConnection.setRemoteDescription(offer);
+        await myPeerConnection.setLocalDescription(offer);
+        await thierPeerConnection.setRemoteDescription(offer);
 
-        thierPeerConnection.createAnswer().then(function (answer) {
+        return thierPeerConnection.createAnswer().then(function (answer) {
             thierPeerConnection.setLocalDescription(answer);
             myPeerConnection.setRemoteDescription(answer);
         })
@@ -84,25 +84,25 @@ function connectionPeer(stream: MediaStream, s: (stream: MediaStream) => void) {
 
 export class WebRTC {
 
-    private signaling: Signaling
+    private readonly signaling: Signaling
 
-    onIncoming: ((peerId: string, incoming: Incomming) => void) = () => { }
+    onIncoming: ((peerId: string, incoming: Incoming) => void) = () => { }
     onRemoteStreamChanged: ((stream: MediaStream | null) => void) = () => { }
 
-    constructor(signling: Signaling) {
-        this.signaling = signling;
+    constructor(signaling: Signaling) {
+        this.signaling = signaling;
         this.init();
     }
 
     private init() {
-        this.signaling.onIncomming = (peerInfo: PeerInfo, incoming: Incomming) => {
+        this.signaling.onIncoming = (peerInfo: PeerInfo, incoming: Incoming) => {
             this.onIncoming(peerInfo.id, incoming);
         }
     }
 
     call(peerId: string): Promise<Dialing> {
-        if (!this.signaling.avaliable()) {
-            return Promise.reject("Signaling not avaliable");
+        if (!this.signaling.available()) {
+            return Promise.reject("Signaling not available");
         }
 
         const dialing = new WsDialing(peerId, this.signaling as WsSignaling);

@@ -1,9 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import './App.css';
-import { Dialing, Dialog, Incomming } from './webrtc/dialing';
-import { mLog, setLogCb } from './webrtc/log';
-import { WsSignaling } from './webrtc/signaling';
-import { rtcConfig, setRtcConfig, WebRTC } from './webrtc/webrtc';
+import { Dialing, Dialog, Incoming } from '../../glide_ts_sdk/src/webrtc/dialing';
+import { mLog, setLogCb } from '../../glide_ts_sdk/src/webrtc/log';
+import { WsSignaling } from '../../glide_ts_sdk/src/webrtc/signaling';
+import { rtcConfig, setRtcConfig, WebRTC } from '../../glide_ts_sdk/src/webrtc/webrtc';
 
 interface AppConfig {
 	signalingUrl: string;
@@ -96,7 +96,7 @@ function WebRtcDemo(props: { ws: string }) {
 	const [hello, setHello] = React.useState(false);
 	const [updateFriendId, setUpdateFriendId] = React.useState(false);
 
-	const [incomming, setIncomming] = React.useState<Incomming | null>(null);
+	const [incomming, setIncomming] = React.useState<Incoming | null>(null);
 	const [dialing, setDialing] = React.useState<Dialing | null>(null);
 	const [call, setCall] = React.useState<Dialog | null>(null);
 
@@ -119,7 +119,7 @@ function WebRtcDemo(props: { ws: string }) {
 	}, [videoTargetRef])
 
 	useEffect(() => {
-		webRTC.onIncoming = (peerId: string, i: Incomming) => {
+		webRTC.onIncoming = (peerId: string, i: Incoming) => {
 			i.peer.onRemoteTrack = (track: RTCTrackEvent) => {
 				videoTargetRef.current!.srcObject = track.streams[0];
 			}

@@ -1,7 +1,7 @@
-import { mLog } from "./log";
-import { Peer } from "./peer";
-import { SignalingMessage, SignalingType, WsSignaling } from "./signaling";
-import { rtcConfig } from "./webrtc";
+import {mLog} from "./log";
+import {Peer} from "./peer";
+import {SignalingMessage, SignalingType, WsSignaling} from "./signaling";
+import {rtcConfig} from "./webrtc";
 
 export interface PeerInfo {
     id: string
@@ -10,24 +10,33 @@ export interface PeerInfo {
 
 export interface Dialing {
     peer: Peer;
+
     cancel(): Promise<void>;
+
     onFail: (error: string) => void;
     onAccept: (accept: Dialog) => void;
     onReject: () => void;
 }
 
-export interface Incomming {
+export interface Incoming {
     peer: Peer;
+
     accept(): Promise<Dialog>;
+
     reject(): Promise<void>;
+
     onCancel: () => void;
 }
 
 export interface Dialog {
     peer: Peer;
+
     openMedia(): Promise<MediaStream>;
+
     onRemoteTrack(c: (r: RTCTrackEvent) => void): void;
+
     onHangup: () => void;
+
     hangup(): Promise<void>;
 }
 
@@ -38,12 +47,12 @@ export interface Media {
 
 export class WsDialog implements Dialog {
 
-    onHangup: () => void = () => { };
+    onHangup: () => void = () => {
+    };
     peer: Peer;
     private signaling: WsSignaling;
-    private isDialer: boolean = false;
-
-    private removeMessageListener: () => void;
+    private readonly isDialer: boolean = false;
+    private readonly removeMessageListener: () => void;
 
     constructor(peer: Peer, dialer: boolean, signaling: WsSignaling) {
         this.peer = peer;
@@ -77,8 +86,7 @@ export class WsDialog implements Dialog {
     }
 
     async openMedia(): Promise<MediaStream> {
-        const stream = await this.peer.attachLocalStream().then();
-        return stream;
+        return await this.peer.attachLocalStream().then();
     }
 
     closeMediaStream() {
@@ -105,24 +113,29 @@ export class WsDialog implements Dialog {
 
 export class WsDialing implements Dialing {
 
-    private signaling: WsSignaling;
+    private readonly signaling: WsSignaling;
     private callTimer: NodeJS.Timer | null = null;
-    private myInfo: PeerInfo;
-    private removeMessageListener: () => void = () => { }
+    private readonly myInfo: PeerInfo;
+    private removeMessageListener: () => void = () => {
+    }
 
     private accepted: boolean = false;
 
-    private failCallback: (error: string) => void = () => { }
+    private failCallback: (error: string) => void = () => {
+    }
 
-    onAccept: ((accept: Dialog) => void) = () => { };
-    onReject: (() => void) = () => { };
-    onFail: ((msg: string) => void) = () => { };
+    onAccept: ((accept: Dialog) => void) = () => {
+    };
+    onReject: (() => void) = () => {
+    };
+    onFail: ((msg: string) => void) = () => {
+    };
 
     peer: Peer;
     peerId: string;
 
     constructor(peerId: string, s: WsSignaling) {
-        this.peer = Peer.create({ id: peerId }, true, rtcConfig, s);
+        this.peer = Peer.create({id: peerId}, true, rtcConfig, s);
         this.myInfo = {
             id: s.myId!!,
         };
@@ -139,8 +152,8 @@ export class WsDialing implements Dialing {
 
     async dial(): Promise<Dialing> {
 
-        if (!this.signaling.avaliable()) {
-            return Promise.reject("Signaling not avaliable");
+        if (!this.signaling.available()) {
+            return Promise.reject("Signaling not available");
         }
         mLog("WsDialing", "dial:" + this.peerId);
 
@@ -189,10 +202,10 @@ export class WsDialing implements Dialing {
             return;
         }
 
-        if (!this.signaling.avaliable()) {
+        if (!this.signaling.available()) {
             this.callTimer && clearInterval(this.callTimer!!);
             this.removeMessageListener()
-            this.failCallback("Signaling not avaliable")
+            this.failCallback("Signaling not available")
             return;
         }
 
@@ -200,23 +213,24 @@ export class WsDialing implements Dialing {
             .then(() => {
 
             }).catch(e => {
-                this.cancel();
-                this.failCallback(e.message)
-            });
+            this.cancel().then(r => {});
+            this.failCallback(e.message)
+        });
 
     }
 }
 
-export class WsIncomming implements Incomming {
+export class WsIncoming implements Incoming {
 
-    private signaling: WsSignaling;
-    private removeMessageListener: () => void;
+    private readonly signaling: WsSignaling;
+    private readonly removeMessageListener: () => void;
     private timeout: NodeJS.Timer | null = null;
 
     peerInfo: PeerInfo;
 
     peer: Peer;
-    onCancel: () => void = () => { };
+    onCancel: () => void = () => {
+    };
 
     constructor(peer: PeerInfo, signaling: WsSignaling) {
         this.peerInfo = peer;
@@ -237,7 +251,7 @@ export class WsIncomming implements Incomming {
                     this.removeMessageListener()
                     this.timeout && clearInterval(this.timeout!!);
                     this.onCancel()
-                    this.signaling.deleteIncomming(this.peerInfo.id)
+                    this.signaling.deleteIncoming(this.peerInfo.id)
                 }
             }
         })
@@ -248,7 +262,7 @@ export class WsIncomming implements Incomming {
 
         this.timeout = setTimeout(() => {
             this.onCancel();
-            this.signaling.deleteIncomming(this.peerInfo.id)
+            this.signaling.deleteIncoming(this.peerInfo.id)
             this.removeMessageListener()
         }, 2000);
     }
@@ -259,7 +273,7 @@ export class WsIncomming implements Incomming {
         const myInfo: PeerInfo = {
             id: this.signaling.myId!!,
         };
-        this.signaling.sendSignaling(this.peerInfo.id, SignalingType.Accept, myInfo);
+        await this.signaling.sendSignaling(this.peerInfo.id, SignalingType.Accept, myInfo);
         this.removeMessageListener();
         this.timeout && clearInterval(this.timeout!!);
         return new WsDialog(this.peer, false, this.signaling);
@@ -268,8 +282,8 @@ export class WsIncomming implements Incomming {
     reject(): Promise<void> {
         this.removeMessageListener()
         this.timeout && clearInterval(this.timeout!!);
-        this.signaling.deleteIncomming(this.peerInfo.id)
+        this.signaling.deleteIncoming(this.peerInfo.id)
 
-        return this.signaling.sendSignaling(this.peerInfo.id, SignalingType.Reject, { id: this.signaling.myId })
+        return this.signaling.sendSignaling(this.peerInfo.id, SignalingType.Reject, {id: this.signaling.myId})
     }
 }

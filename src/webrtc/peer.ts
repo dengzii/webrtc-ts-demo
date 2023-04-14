@@ -1,7 +1,6 @@
-import { json } from "stream/consumers";
-import { PeerInfo } from "./dialing";
-import { mLog } from "./log";
-import { DspMessage, Signaling, SignalingMessage, SignalingType, WsSignaling } from "./signaling";
+import {PeerInfo} from "./dialing";
+import {mLog} from "./log";
+import {DspMessage, Signaling, SignalingMessage, SignalingType, WsSignaling} from "./signaling";
 
 export class Peer {
 
@@ -16,8 +15,10 @@ export class Peer {
 
     private remoteStreamId: string | null = null;
 
-    onRemoteTrack: (track: RTCTrackEvent) => void = () => { };
-    onLocalMediaReady: (m: MediaStream) => void = () => { }
+    onRemoteTrack: (track: RTCTrackEvent) => void = () => {
+    };
+    onLocalMediaReady: (m: MediaStream) => void = () => {
+    }
 
     private constructor(peerId: string, config: RTCConfiguration, signaling: Signaling) {
         this.signaling = signaling;
@@ -119,7 +120,7 @@ export class Peer {
             mLog("peer", 'local stream already active');
             return Promise.resolve(this.localStream);
         } else {
-            const stream_1 = await navigator.mediaDevices.getUserMedia({ video: this.dialer, audio: !this.dialer });
+            const stream_1 = await navigator.mediaDevices.getUserMedia({video: this.dialer, audio: !this.dialer});
             // const stream_1 = await navigator.mediaDevices.getUserMedia({ video: m, audio: !m });
             this.localStream = stream_1;
             this.onLocalMediaReady(stream_1);
@@ -131,7 +132,7 @@ export class Peer {
 
     public close() {
         mLog("peer", 'close');
-        (this.signaling as WsSignaling).deleteIncomming(this.peerId);
+        (this.signaling as WsSignaling).deleteIncoming(this.peerId);
 
         if (this.remoteStream !== null) {
             this.remoteStream.forEach(stream => {
@@ -163,13 +164,13 @@ export class Peer {
             .then(() => {
                 mLog("peer", 'onAnswer setRemoteDescription success');
             }).catch(error => {
-                mLog("peer", 'Error setting remote description:' + error);
-            });
+            mLog("peer", 'Error setting remote description:' + error);
+        });
     }
 
-    public sendAnswer(remote: RTCSessionDescriptionInit) {
+    public async sendAnswer(remote: RTCSessionDescriptionInit) {
         mLog("peer", 'sendAnswer');
-        this.connection!.setRemoteDescription(remote);
+        await this.connection!.setRemoteDescription(remote);
         this.attachLocalStream().then();
         this.connection!.createAnswer()
             .then(answer => {
@@ -180,27 +181,27 @@ export class Peer {
                 }
                 return this.signaling.sendSignaling(this.peerId, SignalingType.Answer, cnt);
             }).then(() => {
-                mLog("peer", 'sendAnswer success');
-            }).catch(error => {
-                mLog("peer", 'Error creating answer:' + error);
-            });
+            mLog("peer", 'sendAnswer success');
+        }).catch(error => {
+            mLog("peer", 'Error creating answer:' + error);
+        });
     }
 
     public sendOffer() {
         mLog("peer", 'sendOffer');
         this.connection.createOffer()
-            .then(offer => {
-                this.connection.setLocalDescription(offer);
+            .then(async offer => {
+                await this.connection.setLocalDescription(offer);
                 const cnt: DspMessage = {
                     peerId: this.signaling.myId!!,
                     sdp: offer,
                 }
                 return this.signaling.sendSignaling(this.peerId, SignalingType.Offer, cnt);
             }).then(() => {
-                mLog("peer", 'sendOffer success');
-            }).catch(error => {
-                mLog("peer", 'Error creating offer:' + JSON.stringify(error));
-            });
+            mLog("peer", 'sendOffer success');
+        }).catch(error => {
+            mLog("peer", 'Error creating offer:' + JSON.stringify(error));
+        });
     }
 
     public addStream(stream: MediaStream) {

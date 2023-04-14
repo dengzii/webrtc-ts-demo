@@ -1,4 +1,4 @@
-import { Incomming, PeerInfo, WsIncomming } from "./dialing";
+import { Incoming, PeerInfo, WsIncoming } from "./dialing";
 import { mLog } from "./log";
 
 export enum SignalingType {
@@ -8,14 +8,14 @@ export enum SignalingType {
     Dialing = "dialing",
     Accept = "accept",
     Reject = "reject",
-    Hangup = "hanup",
+    Hangup = "hangup",
     Cancel = "cancel",
 
     Offer = "webrtc_offer",
     Answer = "webrtc_answer",
     Ice = "webrtc_ice",
     Close = "webrtc_close",
-    Candidate = "webrtc_caditate",
+    Candidate = "webrtc_candidate",
 }
 
 interface Message {
@@ -44,8 +44,8 @@ interface Hello {
 
 export interface Signaling {
     myId: string | null;
-    avaliable(): boolean;
-    onIncomming: (peerInfo: PeerInfo, incoming: Incomming) => void;
+    available(): boolean;
+    onIncoming: (peerInfo: PeerInfo, incoming: Incoming) => void;
     sendSignaling(to: string, type: SignalingType, content: any): Promise<void>
     addMessageListener(l: (m: SignalingMessage) => void): () => void
 }
@@ -60,11 +60,11 @@ export class WsSignaling implements Signaling {
     private idCallback: (id: string) => void = () => { }
 
     private messageListeners: ((m: SignalingMessage) => void)[] = [];
-    private incommings = new Map<string, Incomming>();
+    private incomingList = new Map<string, Incoming>();
 
     myId: string | null = null;
 
-    onIncomming: (peerInfo: PeerInfo, incoming: Incomming) => void = () => { }
+    onIncoming: (peerInfo: PeerInfo, incoming: Incoming) => void = () => { }
     onHelloCallback: (id: string, replay: boolean) => void = () => { }
     logCallback: (message: string) => void = () => { };
 
@@ -78,7 +78,7 @@ export class WsSignaling implements Signaling {
         this.startHeartbeat();
     }
 
-    avaliable(): boolean {
+    available(): boolean {
         return this.ws.readyState === WebSocket.OPEN && this.myId !== null;
     }
 
@@ -101,6 +101,8 @@ export class WsSignaling implements Signaling {
                 seq: this.seq++,
                 from: "",
                 to: ""
+            }).then(r => {
+                //
             });
         }, 15000);
     }
@@ -145,9 +147,9 @@ export class WsSignaling implements Signaling {
         });
     }
 
-    deleteIncomming(peerId: string) {
-        if (this.incommings.has(peerId)) {
-            this.incommings.delete(peerId);
+    deleteIncoming(peerId: string) {
+        if (this.incomingList.has(peerId)) {
+            this.incomingList.delete(peerId);
         }
     }
 
@@ -183,10 +185,10 @@ export class WsSignaling implements Signaling {
                 break;
             case SignalingType.Dialing:
                 const peer = msg.content as PeerInfo;
-                if (!this.incommings.has(peer.id)) {
-                    const incomming = new WsIncomming(peer, this);
-                    this.incommings.set(peer.id, incomming);
-                    this.onIncomming(peer, incomming);
+                if (!this.incomingList.has(peer.id)) {
+                    const incomming = new WsIncoming(peer, this);
+                    this.incomingList.set(peer.id, incomming);
+                    this.onIncoming(peer, incomming);
                 }
         }
     }
